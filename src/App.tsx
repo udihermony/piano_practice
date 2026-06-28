@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useOsmd } from './score/useOsmd';
 import { SAMPLE_C_MAJOR } from './score/sampleScore';
 import { noteName } from './lib/midi';
+import { DetectorPanel } from './components/DetectorPanel';
 
 export default function App() {
   const osmd = useOsmd();
@@ -101,6 +102,8 @@ export default function App() {
           )}
         </div>
       </div>
+
+      <DetectorPanel />
     </div>
   );
 }
