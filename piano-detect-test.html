@@ -5,18 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Piano Detector — Template-Matching Spike</title>
 <style>
-  /* ---- Instrument-panel aesthetic: warm charcoal, sodium-amber readout,
-         detection green, ivory keys. Grounded in tuners / VU meters / spectrum analyzers. ---- */
   :root{
     --bg:#1a1714;
     --panel:#221e1a;
     --line:#3a332c;
     --ink:#e8e0d2;
     --dim:#9b9082;
-    --amber:#f0a830;       /* sodium readout */
+    --amber:#f0a830;
     --amber-soft:#7a5a2a;
-    --green:#5fd47a;        /* confirmed detection */
+    --green:#5fd47a;
     --green-soft:#2a6b3a;
+    --blue:#5ab4f0;
+    --blue-soft:#1a3a5a;
     --ivory:#cfc6b4;
     --sharp:#4a4339;
     --mono:'SF Mono',ui-monospace,'Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
@@ -35,9 +35,9 @@
   button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
   button.primary{background:var(--amber);color:#1a1714;border-color:var(--amber)}
   button.primary[data-on="true"]{background:var(--green);border-color:var(--green)}
+  button.calib-btn{background:var(--blue-soft);color:var(--blue);border-color:var(--blue)}
   button:disabled{opacity:.4;cursor:not-allowed}
 
-  /* ---- Readout: the actual deliverable — what MIDI numbers are detected ---- */
   .readout{font-family:var(--mono);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:14px 16px;margin-bottom:14px;min-height:58px}
   .readout .label{font-size:10px;color:var(--dim);letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}
   .chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-height:26px}
@@ -45,12 +45,10 @@
   .chip .midi{color:var(--ink);opacity:.7;font-weight:400;margin-left:6px;font-size:12px}
   .empty{color:var(--dim);font-size:13px;font-style:italic}
 
-  /* ---- Level meter ---- */
   .meter{height:6px;background:#100e0c;border-radius:3px;overflow:hidden;margin-top:10px;border:1px solid var(--line)}
   .meter > i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--green),var(--amber));transition:width .05s linear}
   .meter.gated > i{background:var(--line)}
 
-  /* ---- Signature element: chromatic spectrum→keyboard strip ---- */
   .keyboard{position:relative;height:200px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 8px 26px;display:flex;align-items:flex-end;gap:1px;overflow-x:auto;margin-bottom:16px}
   .key{position:relative;flex:1 0 9px;min-width:7px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch}
   .key .bar{width:100%;background:var(--amber-soft);border-radius:2px 2px 0 0;height:0%;transition:height .06s linear,background .06s}
@@ -62,8 +60,9 @@
   .key.on.white .base{background:var(--green)}
   .key.on.sharp .base{background:var(--green-soft)}
   .key .oct{position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap}
+  .key.calib-target .base{background:var(--blue)!important}
+  .key.calib-target .bar{background:var(--blue-soft)!important}
 
-  /* ---- Settings ---- */
   details{background:var(--panel);border:1px solid var(--line);border-radius:9px;margin-bottom:14px}
   summary{padding:12px 16px;cursor:pointer;font-size:13px;font-weight:600;list-style:none}
   summary::-webkit-details-marker{display:none}
@@ -80,6 +79,32 @@
   .note{font-size:12px;color:var(--dim);line-height:1.55;font-family:var(--mono);background:#100e0c;border:1px solid var(--line);border-radius:8px;padding:12px 14px}
   .note b{color:var(--amber)}
   .err{color:#e57a6a}
+
+  /* ---- Calibration overlay ---- */
+  #calibOverlay{
+    display:none;position:fixed;inset:0;background:rgba(20,18,16,.92);z-index:100;
+    align-items:center;justify-content:center;padding:24px;
+  }
+  #calibOverlay.open{display:flex}
+  .calib-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:28px 32px;max-width:480px;width:100%;text-align:center}
+  .calib-box h2{font-size:17px;margin:0 0 6px}
+  .calib-box .sub{font-size:13px;color:var(--dim);margin-bottom:22px;line-height:1.5}
+  .calib-progress{display:flex;gap:6px;justify-content:center;margin-bottom:22px;flex-wrap:wrap}
+  .calib-dot{width:10px;height:10px;border-radius:50%;background:var(--line);transition:.2s}
+  .calib-dot.active{background:var(--amber)}
+  .calib-dot.done{background:var(--green)}
+  .calib-note-name{font-family:var(--mono);font-size:48px;font-weight:700;color:var(--amber);
+    margin-bottom:4px;line-height:1}
+  .calib-midi{font-family:var(--mono);font-size:13px;color:var(--dim);margin-bottom:18px}
+  .calib-bar-wrap{height:8px;background:#100e0c;border-radius:4px;overflow:hidden;
+    border:1px solid var(--line);margin-bottom:6px}
+  .calib-bar{height:100%;width:0%;background:var(--amber);border-radius:4px;transition:width .05s}
+  .calib-bar.filling{background:var(--green)}
+  .calib-hint{font-size:12px;color:var(--dim);margin-bottom:20px;min-height:18px}
+  .calib-actions{display:flex;gap:10px;justify-content:center}
+  .calib-skip{font-size:12px;color:var(--dim);margin-top:14px;cursor:pointer;text-decoration:underline}
+  .calib-result{font-size:13px;color:var(--green);margin-top:12px;min-height:18px}
 </style>
 </head>
 <body>
@@ -91,6 +116,7 @@
     <div class="controls">
       <button id="startBtn" class="primary">Start mic</button>
       <button id="stopBtn" disabled>Stop</button>
+      <button id="calibBtn" class="calib-btn" disabled>Calibrate piano</button>
     </div>
   </header>
 
@@ -108,6 +134,10 @@
       <div class="ctl">
         <label>Sensitivity <b id="vSens">0.45</b></label>
         <input type="range" id="sens" min="0.05" max="0.95" step="0.01" value="0.45">
+      </div>
+      <div class="ctl">
+        <label>Stability (frames to confirm) <b id="vStab">3</b></label>
+        <input type="range" id="stab" min="1" max="8" step="1" value="3">
       </div>
       <div class="ctl">
         <label>Silence gate (RMS) <b id="vGate">0.010</b></label>
@@ -138,17 +168,39 @@
       </div>
       <div class="ctl">
         <label class="toggle"><input type="checkbox" id="fund" checked> Require fundamental present</label>
-        <label class="toggle"><input type="checkbox" id="hold"> Hold last detection 120 ms</label>
       </div>
     </div>
   </details>
 
   <div class="note" id="status">
-    <b>How to read this:</b> bars are each note's raw match score (ghosts included, so you can see them);
-    a key turns <span style="color:var(--green)">green</span> only when the greedy peel actually accepts it.
-    Play a triad: all three should go green together. If a chord tone is missing, push <b>Sensitivity</b> up
-    (keeps peeling quieter notes). If a ghost sneaks in green, raise <b>Harmonic subtraction</b>. If real chord
-    tones start dropping when you raise subtraction, you've found this method's ceiling — back it off.
+    <b>How to read this:</b> bars show raw match scores; a key turns
+    <span style="color:var(--green)">green</span> only when the greedy peel accepts it
+    <em>and</em> it has been stable for the required number of frames.
+    If you see too many ghosts, raise <b>Harmonic subtraction</b> or run <b>Calibrate piano</b>
+    to auto-tune sensitivity for your specific piano.
+  </div>
+
+  <!-- Calibration overlay -->
+  <div id="calibOverlay">
+    <div class="calib-box">
+      <h2 id="calibTitle">Calibrate your piano</h2>
+      <div class="sub" id="calibSub">
+        We'll listen to a few notes so the detector learns your piano's sound.
+        Play each note when prompted, hold it for about 1 second.
+      </div>
+      <div class="calib-progress" id="calibProgress"></div>
+      <div class="calib-note-name" id="calibNoteName">—</div>
+      <div class="calib-midi" id="calibMidiLabel"></div>
+      <div class="calib-bar-wrap"><div class="calib-bar" id="calibBar"></div></div>
+      <div class="calib-hint" id="calibHint">Press Start to begin</div>
+      <div class="calib-result" id="calibResult"></div>
+      <div class="calib-actions">
+        <button id="calibStartBtn" class="primary">Start calibration</button>
+        <button id="calibNextBtn" style="display:none">Next note →</button>
+        <button id="calibDoneBtn" style="display:none" class="primary">Done ✓</button>
+      </div>
+      <div class="calib-skip" id="calibClose">Skip / close</div>
+    </div>
   </div>
 
 <script>
@@ -163,18 +215,29 @@
   // ---------- State / config ----------
   const cfg = {
     sens:0.45, gate:0.010, harm:6, oct:0.85, fft:16384,
-    lo:36, hi:96, requireFund:true, hold:false
+    lo:36, hi:96, requireFund:true, stabFrames:3
   };
+
+  // Per-note calibration boosts: midi -> score multiplier (default 1.0)
+  // Calibration sets this based on observed signal strength.
+  const noteBoost = {};
+
   let audioCtx=null, analyser=null, stream=null, raf=null;
   let freqDb=null, timeBuf=null;
-  let keyEls=[];           // index by midi
-  let lastSeen={};         // midi -> timestamp, for hold
+  let keyEls=[];
   let running=false;
+
+  // Stability filter: track how many consecutive frames each note was detected.
+  // A note is "confirmed" only after stabFrames consecutive hits.
+  // On miss, count resets to 0.
+  const stabCount = {};   // midi -> consecutive frame count
+  const confirmed = {};   // midi -> bool (currently confirmed-on)
 
   // ---------- DOM ----------
   const $ = id => document.getElementById(id);
-  const startBtn=$('startBtn'), stopBtn=$('stopBtn'), chips=$('chips');
-  const meter=$('meter'), meterFill=$('meterFill'), status=$('status'), kb=$('keyboard');
+  const startBtn=$('startBtn'), stopBtn=$('stopBtn'), calibBtn=$('calibBtn');
+  const chips=$('chips'), meter=$('meter'), meterFill=$('meterFill');
+  const status=$('status'), kb=$('keyboard');
 
   // ---------- Build keyboard strip ----------
   function buildKeyboard(){
@@ -191,24 +254,14 @@
   }
 
   // ---------- Core: greedy polyphonic estimation with harmonic subtraction ----------
-  // freqDb: Float32Array of dB magnitudes. Returns {scores:Map midi->norm(display), detected:[midi]}
-  //
-  // Why greedy subtraction instead of "score every note, threshold the loudest":
-  // chord tones share partials and split the energy, so a fixed threshold drops the
-  // quieter notes. Instead we pick the strongest note, REMOVE the spectral energy it
-  // explains, then re-scan the residual. After C4's harmonics are subtracted, E4/G4
-  // are the strongest things left and get picked cleanly — and octave ghosts vanish,
-  // since the ghost's "fundamental" was a real note's harmonic that just got removed.
   const MAX_POLYPHONY = 8;
 
   function analyzeFrame(){
     const sr=audioCtx.sampleRate, N=analyser.fftSize, binHz=sr/N, nyq=sr/2;
 
-    // Linear-magnitude residual spectrum we'll subtract from as notes are claimed.
     const residual=new Float32Array(freqDb.length);
     for(let b=0;b<freqDb.length;b++) residual[b]=Math.pow(10, freqDb[b]/20);
 
-    // bins covering harmonic h of fundamental f0 (±~10 cents, ≥1 bin: tuning + inharmonicity)
     const harmBins=(f0,h)=>{
       const fh=f0*h; if(fh>=nyq) return null;
       const win=Math.max(binHz, fh*0.006);
@@ -217,8 +270,6 @@
     };
     const peakIn=(lo,hi)=>{ let p=0; for(let b=lo;b<=hi;b++) if(residual[b]>p) p=residual[b]; return p; };
 
-    // Fundamental-dominant score: each genuine note owns a distinct fundamental, so it
-    // survives subtraction of shared UPPER partials; ghosts (no own f0) collapse.
     function scoreNote(m){
       const f0=midiToFreq(m);
       let fund=0, upper=0;
@@ -227,26 +278,24 @@
         const p=peakIn(hb[0],hb[1]);
         if(h===1) fund=p; else upper += p/h;
       }
-      return cfg.requireFund ? (fund + 0.5*upper) : (0.6*fund + 0.7*upper);
+      const raw = cfg.requireFund ? (fund + 0.5*upper) : (0.6*fund + 0.7*upper);
+      // Apply per-note calibration boost (1.0 = no change)
+      return raw * (noteBoost[m] || 1.0);
     }
 
-    // Snapshot raw scores BEFORE subtraction, for the keyboard bars (shows ghosts too).
     const display=new Map(); let dispMax=1e-9;
     for(let m=cfg.lo;m<=cfg.hi;m++){ const s=scoreNote(m); display.set(m,s); if(s>dispMax)dispMax=s; }
 
-    // Greedy peel: pick strongest, subtract its harmonics, repeat.
     const detected=[];
     let firstScore=0;
-    const stopRatio = 0.18 - 0.15*cfg.sens;   // higher sensitivity => keeps picking quieter notes
+    const stopRatio = 0.18 - 0.15*cfg.sens;
     for(let iter=0; iter<MAX_POLYPHONY; iter++){
       let bestM=-1, best=0;
       for(let m=cfg.lo;m<=cfg.hi;m++){ const s=scoreNote(m); if(s>best){best=s;bestM=m;} }
       if(bestM<0 || best<=0) break;
       if(iter===0) firstScore=best;
-      else if(best < stopRatio*firstScore) break;   // remaining peaks too weak vs strongest
+      else if(best < stopRatio*firstScore) break;
       detected.push(bestM);
-      // Subtract claimed harmonics. cfg.oct = subtraction strength: keep (1-oct) of each bin,
-      // leaving a little so shared-partial chord tones with their own f0 still register.
       const f0=midiToFreq(bestM), keep=1-cfg.oct;
       for(let h=1;h<=cfg.harm;h++){
         const hb=harmBins(f0,h); if(!hb) break;
@@ -255,8 +304,27 @@
     }
 
     const scores=new Map();
-    display.forEach((v,k)=>scores.set(k, v/dispMax));   // normalized only for bar heights
+    display.forEach((v,k)=>scores.set(k, v/dispMax));
     return {scores, detected};
+  }
+
+  // ---------- Stability filter ----------
+  // rawDetected: midi[] from analyzeFrame for this frame.
+  // Returns the stable-confirmed set (midi[]).
+  function applyStability(rawDetected){
+    const rawSet = new Set(rawDetected);
+    for(let m=cfg.lo; m<=cfg.hi; m++){
+      if(rawSet.has(m)){
+        stabCount[m] = (stabCount[m]||0) + 1;
+        if(stabCount[m] >= cfg.stabFrames) confirmed[m] = true;
+      } else {
+        stabCount[m] = 0;
+        confirmed[m] = false;
+      }
+    }
+    const result=[];
+    for(let m=cfg.lo;m<=cfg.hi;m++) if(confirmed[m]) result.push(m);
+    return result;
   }
 
   // ---------- Render loop ----------
@@ -264,7 +332,6 @@
     if(!running) return;
     raf=requestAnimationFrame(loop);
 
-    // RMS level for silence gate
     analyser.getFloatTimeDomainData(timeBuf);
     let sum=0; for(let i=0;i<timeBuf.length;i++) sum+=timeBuf[i]*timeBuf[i];
     const rms=Math.sqrt(sum/timeBuf.length);
@@ -273,18 +340,18 @@
     meter.classList.toggle('gated', gated);
 
     analyser.getFloatFrequencyData(freqDb);
-    let scores=new Map(), detected=[];
-    if(!gated){ const r=analyzeFrame(); scores=r.scores; detected=r.detected; }
-
-    // hold logic
-    const now=performance.now();
-    if(cfg.hold){
-      detected.forEach(m=>lastSeen[m]=now);
-      detected = Object.keys(lastSeen).map(Number).filter(m=> now-lastSeen[m] < 120);
+    let scores=new Map(), stableDetected=[];
+    if(!gated){
+      const r=analyzeFrame();
+      scores=r.scores;
+      stableDetected=applyStability(r.detected);
+    } else {
+      // Reset stability when silent
+      for(let m=cfg.lo;m<=cfg.hi;m++){ stabCount[m]=0; confirmed[m]=false; }
     }
-    const onSet=new Set(detected);
+    const onSet=new Set(stableDetected);
 
-    // paint keyboard
+    // Paint keyboard
     for(let m=cfg.lo;m<=cfg.hi;m++){
       const el=keyEls[m]; if(!el) continue;
       const s=scores.get(m)||0;
@@ -292,22 +359,24 @@
       el.classList.toggle('on', onSet.has(m));
     }
 
-    // paint readout
-    if(detected.length){
-      detected.sort((a,b)=>a-b);
-      chips.innerHTML=detected.map(m=>
+    // Paint readout
+    if(stableDetected.length){
+      stableDetected.sort((a,b)=>a-b);
+      chips.innerHTML=stableDetected.map(m=>
         `<span class="chip">${noteName(m)}<span class="midi">${m}</span></span>`).join('');
     } else {
       chips.innerHTML = gated
         ? '<span class="empty">Listening… (below silence gate)</span>'
         : '<span class="empty">No note matched.</span>';
     }
+
+    // Forward frames to calibration listener if active
+    if(calibListening && !gated) calibOnFrame(scores, rms);
   }
 
   // ---------- Mic lifecycle ----------
   async function start(){
     try{
-      // CRITICAL: speech DSP defaults mangle music — turn all three off.
       stream = await navigator.mediaDevices.getUserMedia({
         audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }
       });
@@ -316,22 +385,23 @@
       const srcNode=audioCtx.createMediaStreamSource(stream);
       analyser=audioCtx.createAnalyser();
       analyser.fftSize=cfg.fft;
-      analyser.smoothingTimeConstant=0;       // we want responsiveness, not temporal blur
+      analyser.smoothingTimeConstant=0;
       analyser.minDecibels=-100; analyser.maxDecibels=-10;
       srcNode.connect(analyser);
       freqDb=new Float32Array(analyser.frequencyBinCount);
       timeBuf=new Float32Array(analyser.fftSize);
 
-      running=true; lastSeen={};
+      running=true;
       startBtn.disabled=true; startBtn.dataset.on='true'; startBtn.textContent='● Listening';
-      stopBtn.disabled=false;
+      stopBtn.disabled=false; calibBtn.disabled=false;
       status.innerHTML='<b>Mic live at '+Math.round(audioCtx.sampleRate)+' Hz.</b> '+
-        'Resolution ≈ '+(audioCtx.sampleRate/cfg.fft).toFixed(1)+' Hz/bin. '+
-        'Low notes (below ~C3) resolve worst — expect them last to behave.';
+        'Resolution ≈ '+(audioCtx.sampleRate/cfg.fft).toFixed(1)+' Hz/bin · '+
+        'Stability: '+cfg.stabFrames+' frames (~'+(cfg.stabFrames*16).toFixed(0)+' ms). '+
+        'Run <b>Calibrate piano</b> to auto-tune for your piano.';
       loop();
     }catch(e){
       status.innerHTML='<span class="err">Mic error: '+e.message+'</span><br>'+
-        'Needs a secure context: use <b>localhost</b> on desktop, or HTTPS (a tunnel) on your phone.';
+        'Needs a secure context: use <b>localhost</b> on desktop, or the Chrome flag on your phone (see HANDOFF.md).';
     }
   }
   function stop(){
@@ -340,28 +410,224 @@
     if(audioCtx) audioCtx.close();
     audioCtx=analyser=stream=null;
     startBtn.disabled=false; startBtn.dataset.on='false'; startBtn.textContent='Start mic';
-    stopBtn.disabled=true;
+    stopBtn.disabled=true; calibBtn.disabled=true;
     chips.innerHTML='<span class="empty">Stopped.</span>';
-    for(let m=cfg.lo;m<=cfg.hi;m++){ const el=keyEls[m]; if(el){el.classList.remove('on');el.querySelector('.bar').style.height='0%';} }
+    for(let m=cfg.lo;m<=cfg.hi;m++){
+      const el=keyEls[m]; if(el){el.classList.remove('on');el.querySelector('.bar').style.height='0%';}
+    }
     meterFill.style.width='0%';
   }
 
   // ---------- Wire controls ----------
   startBtn.onclick=start; stopBtn.onclick=stop;
+  calibBtn.onclick=openCalib;
+
   const bind=(id,key,fmt,after)=>{ const el=$(id); el.oninput=()=>{ cfg[key]=parseFloat(el.value);
     if(fmt) $(fmt).textContent = key==='gate'?cfg[key].toFixed(3):(key==='sens'||key==='oct'?cfg[key].toFixed(2):cfg[key]);
     if(after) after(); }; };
   bind('sens','sens','vSens'); bind('gate','gate','vGate');
   bind('harm','harm','vHarm'); bind('oct','oct','vOct');
+  $('stab').oninput=()=>{ cfg.stabFrames=parseInt($('stab').value); $('vStab').textContent=cfg.stabFrames; };
   $('fft').onchange=()=>{ cfg.fft=parseInt($('fft').value); if(running){stop();} };
   $('fund').onchange=e=>cfg.requireFund=e.target.checked;
-  $('hold').onchange=e=>{cfg.hold=e.target.checked; lastSeen={};};
   const rangeUpd=()=>{ cfg.lo=parseInt($('lo').value); cfg.hi=parseInt($('hi').value);
     if(cfg.hi<=cfg.lo+11){ cfg.hi=cfg.lo+12; $('hi').value=cfg.hi; }
     $('vRange').textContent=cfg.lo+'–'+cfg.hi; buildKeyboard(); };
   $('lo').oninput=rangeUpd; $('hi').oninput=rangeUpd;
 
   buildKeyboard();
+
+  // =====================================================================
+  // CALIBRATION WIZARD
+  // =====================================================================
+  // Strategy: ask user to play each calibration note 3 times.
+  // For each strike, we find the peak score frame during the ~1s window.
+  // We average the peak scores across strikes to get the expected signal
+  // strength for that note. Then we normalize boosts so the median
+  // calibrated note has boost=1 and weaker notes get a lift.
+  // =====================================================================
+
+  // Notes to calibrate: one per octave in the main range + a few key spots
+  const CALIB_NOTES = [48, 60, 69, 72, 84]; // C3, C4, A4, C5, C6
+  const STRIKES_PER_NOTE = 3;
+
+  let calibStep = 0;       // index into CALIB_NOTES
+  let calibStrike = 0;     // 0..STRIKES_PER_NOTE-1
+  let calibPhase = 'idle'; // idle | waiting | recording | done
+  let calibListening = false;
+  let calibFrameScores = []; // score samples for current strike
+  let calibPeaks = {};       // midi -> [peak, peak, peak]
+  let calibSilenceFrames = 0;
+  const CALIB_RECORD_MS = 1200;  // record window per strike
+  let calibRecordStart = 0;
+
+  function openCalib(){
+    calibStep=0; calibStrike=0; calibPhase='waiting';
+    calibPeaks={};
+    CALIB_NOTES.forEach(m=>calibPeaks[m]=[]);
+    renderCalibStep();
+    $('calibOverlay').classList.add('open');
+  }
+  $('calibClose').onclick=closeCalib;
+  $('calibStartBtn').onclick=beginStrike;
+  $('calibNextBtn').onclick=()=>{
+    calibStep++;
+    if(calibStep>=CALIB_NOTES.length){ finishCalib(); return; }
+    calibStrike=0; calibPhase='waiting';
+    renderCalibStep();
+  };
+  $('calibDoneBtn').onclick=closeCalib;
+
+  function closeCalib(){
+    calibListening=false; calibPhase='idle';
+    $('calibOverlay').classList.remove('open');
+    // Remove calib-target highlighting
+    CALIB_NOTES.forEach(m=>{ const el=keyEls[m]; if(el) el.classList.remove('calib-target'); });
+  }
+
+  function renderCalibStep(){
+    const m = CALIB_NOTES[calibStep];
+    $('calibNoteName').textContent = noteName(m);
+    $('calibMidiLabel').textContent = 'MIDI '+m;
+    $('calibTitle').textContent = 'Calibrate your piano';
+    $('calibSub').textContent =
+      'Play this note '+(STRIKES_PER_NOTE - calibStrike)+' more time'+(STRIKES_PER_NOTE-calibStrike!==1?'s':'')+
+      ' — hold each strike for about 1 second. We\'ll detect the peak automatically.';
+    $('calibResult').textContent='';
+    $('calibBar').style.width='0%';
+    $('calibBar').classList.remove('filling');
+    $('calibHint').textContent='Press the note when you\'re ready, or press Start to begin.';
+    $('calibStartBtn').style.display='inline-block';
+    $('calibNextBtn').style.display='none';
+    $('calibDoneBtn').style.display='none';
+
+    // Progress dots
+    const pd=$('calibProgress'); pd.innerHTML='';
+    CALIB_NOTES.forEach((n,i)=>{
+      const d=document.createElement('div');
+      d.className='calib-dot'+(i<calibStep?' done':i===calibStep?' active':'');
+      pd.appendChild(d);
+    });
+
+    // Highlight target key
+    CALIB_NOTES.forEach(n=>{ const el=keyEls[n]; if(el) el.classList.remove('calib-target'); });
+    const el=keyEls[m]; if(el) el.classList.add('calib-target');
+
+    // Scroll keyboard to show target
+    if(el) el.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'});
+  }
+
+  function beginStrike(){
+    calibPhase='recording';
+    calibListening=true;
+    calibFrameScores=[];
+    calibRecordStart=performance.now();
+    calibSilenceFrames=0;
+    $('calibStartBtn').style.display='none';
+    $('calibHint').textContent='Listening… hold the note.';
+    $('calibBar').style.width='0%';
+    $('calibBar').classList.remove('filling');
+  }
+
+  // Called every frame by the render loop when calibListening=true
+  function calibOnFrame(scores, rms){
+    if(calibPhase!=='recording') return;
+    const m=CALIB_NOTES[calibStep];
+    const score = scores.get(m)||0;
+    calibFrameScores.push(score);
+
+    const elapsed = performance.now()-calibRecordStart;
+    const pct = Math.min(100, elapsed/CALIB_RECORD_MS*100);
+    $('calibBar').style.width=pct+'%';
+    if(pct>30) $('calibBar').classList.add('filling');
+
+    if(elapsed >= CALIB_RECORD_MS){
+      // Strike done: record peak score for this strike
+      const peak = Math.max(...calibFrameScores);
+      calibPeaks[m].push(peak);
+      calibListening=false;
+      calibPhase='between';
+      calibFrameScores=[];
+
+      calibStrike++;
+      const remaining = STRIKES_PER_NOTE - calibStrike;
+      if(remaining > 0){
+        $('calibHint').textContent='Got it! '+remaining+' more strike'+(remaining!==1?'s':'')+' for this note.';
+        $('calibResult').textContent='Peak score: '+(peak*100).toFixed(0)+'%';
+        // Auto-restart after brief pause
+        setTimeout(()=>{
+          if(calibPhase==='between'){
+            beginStrike();
+          }
+        }, 900);
+      } else {
+        // All strikes done for this note
+        const avg = calibPeaks[m].reduce((a,b)=>a+b,0)/calibPeaks[m].length;
+        $('calibHint').textContent='All strikes captured.';
+        $('calibResult').textContent='Average peak: '+(avg*100).toFixed(0)+'% — '+
+          (avg>0.3?'Strong signal ✓':avg>0.12?'Moderate signal':' Weak — mic may be too far');
+        $('calibBar').style.width='100%';
+
+        if(calibStep < CALIB_NOTES.length-1){
+          $('calibNextBtn').style.display='inline-block';
+          $('calibNextBtn').textContent='Next note →';
+        } else {
+          $('calibNextBtn').style.display='inline-block';
+          $('calibNextBtn').textContent='Calculate ✓';
+        }
+        $('calibStartBtn').style.display='none';
+      }
+    }
+  }
+
+  function finishCalib(){
+    // Compute per-note boosts:
+    // For each calibrated note, boost = median_peak / that_note_peak
+    // (i.e. notes the piano plays quieter into the mic get a higher boost)
+    const peaks = CALIB_NOTES.map(m=>{
+      const arr=calibPeaks[m];
+      return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : null;
+    }).filter(x=>x!==null);
+
+    if(!peaks.length){ closeCalib(); return; }
+
+    peaks.sort((a,b)=>a-b);
+    const medianPeak = peaks[Math.floor(peaks.length/2)];
+
+    CALIB_NOTES.forEach(m=>{
+      const arr=calibPeaks[m];
+      if(!arr.length) return;
+      const avg=arr.reduce((a,b)=>a+b,0)/arr.length;
+      if(avg>0.01){
+        // Boost this note so it registers as strongly as the median note.
+        // Cap at 3x so we don't amplify noise wildly for very weak notes.
+        noteBoost[m] = Math.min(3.0, medianPeak/avg);
+      }
+    });
+
+    // Also nudge sensitivity down slightly — calibration means we need less
+    // tolerance for ghosts since the expected notes are boosted.
+    if(cfg.sens > 0.35) {
+      cfg.sens = Math.max(0.30, cfg.sens - 0.08);
+      $('sens').value=cfg.sens; $('vSens').textContent=cfg.sens.toFixed(2);
+    }
+
+    $('calibTitle').textContent='Calibration complete';
+    $('calibSub').textContent='The detector has been tuned for your piano. '+
+      'Notes that sounded quieter into the mic were boosted. Try playing now.';
+    $('calibProgress').querySelectorAll('.calib-dot').forEach(d=>d.className='calib-dot done');
+    $('calibNoteName').textContent='✓';
+    $('calibMidiLabel').textContent='';
+    $('calibHint').textContent='';
+    $('calibResult').textContent=
+      'Boosts applied: '+CALIB_NOTES.filter(m=>noteBoost[m]&&noteBoost[m]!==1)
+        .map(m=>noteName(m)+'×'+(noteBoost[m]||1).toFixed(1)).join(', ');
+    $('calibBar').style.width='100%';
+    $('calibNextBtn').style.display='none';
+    $('calibDoneBtn').style.display='inline-block';
+    CALIB_NOTES.forEach(n=>{ const el=keyEls[n]; if(el) el.classList.remove('calib-target'); });
+  }
+
 })();
 </script>
 </body>
