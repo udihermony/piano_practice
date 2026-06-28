@@ -403,21 +403,29 @@
       }
     }
 
-    // Rule 2 — Harmonic ghost suppression: for any pair of accepted notes where
-    // one is a harmonic of the other, suppress the HIGHER note (the ghost),
-    // regardless of which scored higher. On a piano the fundamental is always
-    // the real note; the overtone above it is always the ghost.
-    const HARMONIC_RATIOS = [2.0, 3.0, 1.5, 2.5, 4.0, 5.0, 3.5];
+    // Rule 2 — Harmonic ghost suppression.
+    // A note's TRUE harmonics are INTEGER multiples of its fundamental (2x,3x,...).
+    // Non-integer ratios like 1.5 (perfect fifth) or 1.25 (major third) are NOT
+    // harmonics — they are exactly the intervals real chords are built from, so we
+    // must NOT touch them or we delete legitimate chord tones (the fifth above the
+    // root, etc.). Only suppress an upper note that (a) lands on an integer harmonic
+    // of a lower note AND (b) is weak relative to it — a deliberately-played octave
+    // chord tone has its own strong fundamental and survives; a ringing overtone
+    // ghost does not.
+    const HARMONIC_RATIOS = [2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
     const RATIO_TOL = 0.02;
+    const GHOST_REL = 0.5;   // upper note must score < 0.5x the lower to be a ghost
     for(const lower of detected){
       if(suppressed.has(lower)) continue;
       const fLower = midiToFreq(lower);
+      const sLower = peelScores(lower);
       for(const higher of detected){
         if(higher <= lower || suppressed.has(higher)) continue;
+        if(peelScores(higher) >= sLower * GHOST_REL) continue; // strong enough to be real
         const ratio = midiToFreq(higher) / fLower;
         for(const hr of HARMONIC_RATIOS){
           if(Math.abs(ratio - hr) / hr < RATIO_TOL){
-            suppressed.add(higher); // always suppress the upper note
+            suppressed.add(higher);
             break;
           }
         }
