@@ -299,6 +299,7 @@
   // After onset: run detector for CAPTURE_FRAMES, vote, lock result.
   const ONSET_COOLDOWN_MS = 200; // min ms between onsets
   const CAPTURE_FRAMES = 10;    // frames after onset to collect votes (~165ms)
+  const CAPTURE_SKIP  = 3;      // skip first N frames — old note still dominant there
   let prevSpectrum    = null;   // Float32Array of previous frame magnitudes
   let fluxSmooth      = 0;      // smoothed flux baseline
   let lastOnsetMs     = -9999;
@@ -401,24 +402,28 @@
       }
     }
 
-    // Rule 2 — Harmonic ghost suppression: drop a note if a stronger accepted
-    // note's harmonic series explains it (octave ×2, fifth ×1.5, etc.).
-    // Tolerance: 25 cents (freq ratio within 1.4%).
-    const HARMONIC_RATIOS = [2.0, 3.0, 1.5, 2.5, 4.0];
-    const RATIO_TOL = 0.014;
-    for(const strong of detected){
-      if(suppressed.has(strong)) continue;
-      const fStrong = midiToFreq(strong);
-      for(const candidate of detected){
-        if(candidate === strong || suppressed.has(candidate)) continue;
-        if(peelScores(candidate) >= peelScores(strong)) continue; // only suppress weaker
-        const ratio = midiToFreq(candidate) / fStrong;
+    // Rule 2 — Harmonic ghost suppression: drop a candidate if any stronger
+    // accepted note's harmonic series lands on it.
+    // Also check sub-harmonic: if candidate * ratio ≈ strong (candidate is a
+    // ghost of a lower strong note whose harmonic lands here).
+    // Tolerance: 35 cents (~2% frequency ratio).
+    const HARMONIC_RATIOS = [2.0, 3.0, 1.5, 2.5, 4.0, 5.0, 3.5];
+    const RATIO_TOL = 0.02;
+    for(const candidate of detected){
+      if(suppressed.has(candidate)) continue;
+      const fCand = midiToFreq(candidate);
+      for(const strong of detected){
+        if(strong === candidate || suppressed.has(strong)) continue;
+        if(peelScores(strong) <= peelScores(candidate)) continue;
+        const fStrong = midiToFreq(strong);
+        const ratio = fCand / fStrong;
         for(const hr of HARMONIC_RATIOS){
           if(Math.abs(ratio - hr) / hr < RATIO_TOL){
             suppressed.add(candidate);
             break;
           }
         }
+        if(suppressed.has(candidate)) break;
       }
     }
 
@@ -503,16 +508,21 @@
         captureVotes = {};
       }
 
-      // During capture window: run detector and vote
+      // During capture window: run detector and vote.
+      // Skip the first CAPTURE_SKIP frames — the old note is still dominant there.
       if(captureFramesLeft > 0){
+        const frameIdx = CAPTURE_FRAMES - captureFramesLeft; // 0-based
         const r = analyzeFrame();
         heldScores = r.scores;
-        r.detected.forEach(m=>{ captureVotes[m] = (captureVotes[m]||0) + 1; });
+        if(frameIdx >= CAPTURE_SKIP){
+          r.detected.forEach(m=>{ captureVotes[m] = (captureVotes[m]||0) + 1; });
+        }
         captureFramesLeft--;
 
         if(captureFramesLeft === 0){
-          // Lock in notes that were detected in majority of capture frames
-          const threshold = Math.ceil(CAPTURE_FRAMES * 0.6);
+          // Lock in notes detected in majority of the voting frames
+          const votingFrames = CAPTURE_FRAMES - CAPTURE_SKIP;
+          const threshold = Math.ceil(votingFrames * 0.6);
           heldNotes = Object.entries(captureVotes)
             .filter(([,v])=>v >= threshold)
             .map(([m])=>parseInt(m))
