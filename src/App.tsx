@@ -22,8 +22,20 @@ export default function App() {
   const [showCalib, setShowCalib] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [library, setLibrary] = useState<string[]>([]);
+
   const noteBoost = useMemo(() => boostMap(calibration), [calibration]);
   const detectorConfig = useMemo(() => ({ noteBoost }), [noteBoost]);
+
+  // Fetch the shared library list (served from public/library on the dev server).
+  useEffect(() => {
+    fetch('/library-list')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((files: string[]) => setLibrary(files))
+      .catch(() => setLibrary([]));
+  }, []);
+
+  const prettyName = (file: string) => file.replace(/\.(xml|musicxml|mxl)$/i, '').replace(/_/g, ' ');
 
   // Feed expected notes to the detector while practicing → score-informed verification.
   const mic = useMic({
@@ -95,7 +107,28 @@ export default function App() {
               e.target.value = '';
             }}
           />
-          <button onClick={() => fileInputRef.current?.click()}>Load MusicXML…</button>
+          {library.length > 0 && (
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const file = e.target.value;
+                if (file) {
+                  setPracticing(false);
+                  void osmd.loadUrl(`/library/${encodeURIComponent(file)}`);
+                }
+              }}
+            >
+              <option value="" disabled>
+                Library…
+              </option>
+              {library.map((f) => (
+                <option key={f} value={f}>
+                  {prettyName(f)}
+                </option>
+              ))}
+            </select>
+          )}
+          <button onClick={() => fileInputRef.current?.click()}>Load file…</button>
           <button
             onClick={() => {
               setPracticing(false);

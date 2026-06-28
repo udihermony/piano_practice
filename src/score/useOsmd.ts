@@ -24,6 +24,8 @@ export interface UseOsmd {
   loadXml: (xml: string) => Promise<void>;
   /** Load a user-picked file: .xml/.musicxml (text) or .mxl (compressed). */
   loadFile: (file: File) => Promise<void>;
+  /** Load from a URL (shared library), handling .mxl vs text by extension. */
+  loadUrl: (url: string) => Promise<void>;
 }
 
 function frequencyToMidi(freq: number): number {
@@ -124,6 +126,21 @@ export function useOsmd(): UseOsmd {
     [loadXml],
   );
 
+  const loadUrl = useCallback(
+    async (url: string) => {
+      const res = await fetch(url);
+      if (url.toLowerCase().endsWith('.mxl')) {
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        let bin = '';
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        await loadXml(bin);
+      } else {
+        await loadXml(await res.text());
+      }
+    },
+    [loadXml],
+  );
+
   const next = useCallback(() => {
     const osmd = osmdRef.current;
     if (!osmd?.cursor) return;
@@ -158,5 +175,6 @@ export function useOsmd(): UseOsmd {
     reset,
     loadXml,
     loadFile,
+    loadUrl,
   };
 }

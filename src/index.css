@@ -46,6 +46,19 @@ button:hover:not(:disabled) { border-color: var(--amber); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 button.primary { background: var(--amber); color: #1a1714; border-color: var(--amber); }
 
+select {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+select:hover { border-color: var(--amber); }
+
 /* OSMD renders into a white-ish SVG; give it a surface so it reads on dark bg. */
 .score-surface {
   background: #f7f3ea;
