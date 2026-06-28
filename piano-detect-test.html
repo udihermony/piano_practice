@@ -377,9 +377,33 @@
       }
     }
 
+    // Neighbor suppression: among accepted notes, drop any note that has a
+    // stronger accepted neighbor within 2 semitones. Real chord tones (C-E-G)
+    // are always 3+ semitones apart; semitone ghosts caused by harmonic bleed
+    // are always weaker than the real note that generated them.
+    const detectedSet = new Set(detected);
+    const peelScores = new Map();
+    // Re-score on ORIGINAL residual snapshot isn't available, so use display scores
+    // (pre-subtraction), which still correctly rank real notes above their neighbors.
+    detected.forEach(m => peelScores.set(m, display.get(m)||0));
+
+    const suppressed = new Set();
+    for(const m of detected){
+      if(suppressed.has(m)) continue;
+      for(const n of detected){
+        if(n === m || suppressed.has(n)) continue;
+        if(Math.abs(n - m) <= 2){
+          // Drop the weaker of the two
+          if((peelScores.get(m)||0) >= (peelScores.get(n)||0)) suppressed.add(n);
+          else suppressed.add(m);
+        }
+      }
+    }
+    const filteredDetected = detected.filter(m => !suppressed.has(m));
+
     const scores=new Map();
     display.forEach((v,k)=>scores.set(k, v/dispMax));
-    return {scores, detected};
+    return {scores, detected: filteredDetected};
   }
 
   // ---------- Stability filter ----------
