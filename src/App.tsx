@@ -8,9 +8,10 @@ import { DetectorPanel } from './components/DetectorPanel';
 
 export default function App() {
   const osmd = useOsmd();
-  const mic = useMic();
   const [practicing, setPracticing] = useState(false);
   const [justMatched, setJustMatched] = useState(false);
+  // Feed expected notes to the detector while practicing → score-informed verification.
+  const mic = useMic({ expected: practicing ? osmd.expectedMidi : null });
 
   // Load the sample score once OSMD is ready.
   useEffect(() => {

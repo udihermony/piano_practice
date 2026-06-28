@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   analyzeSpectrum,
+  verifyExpected,
   DEFAULT_DETECTOR_CONFIG,
   type DetectorConfig,
 } from './pitchDetector';
@@ -27,6 +28,12 @@ export interface UseMicOptions {
   fftSize?: number;
   /** Flux must exceed this multiple of the smoothed baseline to count as an onset. */
   onsetFluxRatio?: number;
+  /**
+   * When set (practice mode), the detector verifies only these expected pitches
+   * instead of transcribing the whole spectrum — much more reliable. Null = free
+   * transcription (free-play readout).
+   */
+  expected?: number[] | null;
 }
 
 export interface UseMic {
@@ -86,6 +93,12 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
   useEffect(() => {
     cfgRef.current = { ...DEFAULT_DETECTOR_CONFIG, ...opts.detectorConfig };
   }, [opts.detectorConfig]);
+
+  // Current expected set for score-informed verification (null = free transcription).
+  const expectedRef = useRef<number[] | null>(opts.expected ?? null);
+  useEffect(() => {
+    expectedRef.current = opts.expected ?? null;
+  }, [opts.expected]);
 
   const loop = useCallback(() => {
     const ctx = ctxRef.current;
@@ -151,10 +164,20 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
     // 3. Capture-window voting
     if (captureLeftRef.current > 0) {
       const frameIdx = CAPTURE_FRAMES - captureLeftRef.current;
-      const result = analyzeSpectrum(freqDb, ctx.sampleRate, analyser.fftSize, cfgRef.current);
-      setScores(result.scores);
+      const expected = expectedRef.current;
+
+      // Score-informed when practicing (verify expected pitches), else full transcription.
+      let frameDetected: number[];
+      if (expected && expected.length > 0) {
+        frameDetected = verifyExpected(freqDb, ctx.sampleRate, analyser.fftSize, cfgRef.current, expected);
+      } else {
+        const result = analyzeSpectrum(freqDb, ctx.sampleRate, analyser.fftSize, cfgRef.current);
+        setScores(result.scores);
+        frameDetected = result.detected;
+      }
+
       if (frameIdx >= CAPTURE_SKIP) {
-        for (const m of result.detected) {
+        for (const m of frameDetected) {
           captureVotesRef.current[m] = (captureVotesRef.current[m] ?? 0) + 1;
         }
       }

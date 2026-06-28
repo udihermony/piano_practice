@@ -47,6 +47,49 @@ const A4 = 440;
 const MAX_POLYPHONY = 8;
 const midiToFreq = (m: number) => A4 * Math.pow(2, (m - 69) / 12);
 
+/** Bins covering harmonic h of f0 (±~10 cents, ≥1 bin). */
+function harmBins(
+  f0: number,
+  h: number,
+  binHz: number,
+  nyq: number,
+  len: number,
+): [number, number] | null {
+  const fh = f0 * h;
+  if (fh >= nyq) return null;
+  const win = Math.max(binHz, fh * 0.006);
+  return [Math.max(0, Math.floor((fh - win) / binHz)), Math.min(len - 1, Math.ceil((fh + win) / binHz))];
+}
+
+/** Fundamental-dominant harmonic-template score for note `m` over a linear spectrum. */
+function harmonicScore(
+  spectrum: Float32Array,
+  m: number,
+  binHz: number,
+  nyq: number,
+  cfg: DetectorConfig,
+): number {
+  const f0 = midiToFreq(m);
+  let fund = 0;
+  let upper = 0;
+  for (let h = 1; h <= cfg.harm; h++) {
+    const hb = harmBins(f0, h, binHz, nyq, spectrum.length);
+    if (!hb) break;
+    let peak = 0;
+    for (let b = hb[0]; b <= hb[1]; b++) if (spectrum[b] > peak) peak = spectrum[b];
+    if (h === 1) fund = peak;
+    else upper += peak / h;
+  }
+  const raw = cfg.requireFund ? fund + 0.5 * upper : 0.6 * fund + 0.7 * upper;
+  return raw * (cfg.noteBoost[m] ?? 1);
+}
+
+function dbToLinear(freqDb: Float32Array): Float32Array<ArrayBuffer> {
+  const out = new Float32Array(freqDb.length);
+  for (let b = 0; b < freqDb.length; b++) out[b] = Math.pow(10, freqDb[b] / 20);
+  return out;
+}
+
 /**
  * Analyze one frequency-domain frame.
  * @param freqDb dB-magnitude spectrum from AnalyserNode.getFloatFrequencyData
@@ -63,41 +106,8 @@ export function analyzeSpectrum(
   const nyq = sampleRate / 2;
 
   // Linear-magnitude residual we subtract from as notes are claimed.
-  const residual = new Float32Array(freqDb.length);
-  for (let b = 0; b < freqDb.length; b++) residual[b] = Math.pow(10, freqDb[b] / 20);
-
-  // Bins covering harmonic h of f0 (±~10 cents, ≥1 bin: tuning + inharmonicity).
-  const harmBins = (f0: number, h: number): [number, number] | null => {
-    const fh = f0 * h;
-    if (fh >= nyq) return null;
-    const win = Math.max(binHz, fh * 0.006);
-    return [
-      Math.max(0, Math.floor((fh - win) / binHz)),
-      Math.min(residual.length - 1, Math.ceil((fh + win) / binHz)),
-    ];
-  };
-  const peakIn = (lo: number, hi: number): number => {
-    let p = 0;
-    for (let b = lo; b <= hi; b++) if (residual[b] > p) p = residual[b];
-    return p;
-  };
-
-  // Fundamental-dominant score so each genuine note survives subtraction of
-  // shared UPPER partials; ghosts (no own f0) collapse. Calibration boost applied.
-  const scoreNote = (m: number): number => {
-    const f0 = midiToFreq(m);
-    let fund = 0;
-    let upper = 0;
-    for (let h = 1; h <= cfg.harm; h++) {
-      const hb = harmBins(f0, h);
-      if (!hb) break;
-      const p = peakIn(hb[0], hb[1]);
-      if (h === 1) fund = p;
-      else upper += p / h;
-    }
-    const raw = cfg.requireFund ? fund + 0.5 * upper : 0.6 * fund + 0.7 * upper;
-    return raw * (cfg.noteBoost[m] ?? 1);
-  };
+  const residual = dbToLinear(freqDb);
+  const scoreNote = (m: number): number => harmonicScore(residual, m, binHz, nyq, cfg);
 
   // Snapshot raw scores BEFORE subtraction, for display bars (shows ghosts too).
   const display = new Map<number, number>();
@@ -129,7 +139,7 @@ export function analyzeSpectrum(
     const f0 = midiToFreq(bestM);
     const keep = 1 - cfg.oct;
     for (let h = 1; h <= cfg.harm; h++) {
-      const hb = harmBins(f0, h);
+      const hb = harmBins(f0, h, binHz, nyq, residual.length);
       if (!hb) break;
       for (let b = hb[0]; b <= hb[1]; b++) residual[b] *= keep;
     }
@@ -188,4 +198,54 @@ function suppressGhosts(detected: number[], display: Map<number, number>): numbe
   }
 
   return detected.filter((m) => !suppressed.has(m));
+}
+
+/**
+ * Score-informed verification (HANDOFF §7.4). Given the pitches expected at the
+ * cursor, return which of them are actually present — instead of transcribing the
+ * whole spectrum. This sidesteps the octave-ghost problem: we never ask "is D5
+ * present?" when the score expects D4, so an octave overtone can't be mistaken for
+ * the played note. Far more reliable than open-ended polyphony.
+ *
+ * A note counts as present when its harmonic-template score is BOTH:
+ *  - a meaningful fraction of the strongest expected note (within-chord balance), and
+ *  - well above the background floor (median score across the candidate range),
+ *    which confirms real energy at that pitch rather than noise/bleed.
+ */
+const VERIFY_REL = 0.18; // fraction of the strongest expected note
+const VERIFY_FLOOR_MULT = 4; // multiples of the median background score
+
+export function verifyExpected(
+  freqDb: Float32Array,
+  sampleRate: number,
+  fftSize: number,
+  cfg: DetectorConfig,
+  expected: number[],
+): number[] {
+  if (expected.length === 0) return [];
+  const binHz = sampleRate / fftSize;
+  const nyq = sampleRate / 2;
+  const spectrum = dbToLinear(freqDb);
+
+  // Background floor: median score across the full candidate range.
+  const all: number[] = [];
+  for (let m = cfg.lo; m <= cfg.hi; m++) all.push(harmonicScore(spectrum, m, binHz, nyq, cfg));
+  all.sort((a, b) => a - b);
+  const floor = all[Math.floor(all.length / 2)] || 1e-9;
+
+  // Score each expected note; find the strongest for the relative test.
+  const expScores = new Map<number, number>();
+  let maxExp = 1e-9;
+  for (const m of expected) {
+    const s = harmonicScore(spectrum, m, binHz, nyq, cfg);
+    expScores.set(m, s);
+    if (s > maxExp) maxExp = s;
+  }
+
+  const present: number[] = [];
+  for (const m of expected) {
+    const s = expScores.get(m)!;
+    if (s >= maxExp * VERIFY_REL && s >= floor * VERIFY_FLOOR_MULT) present.push(m);
+  }
+  return present.sort((a, b) => a - b);
 }
