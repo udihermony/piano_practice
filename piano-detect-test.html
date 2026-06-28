@@ -590,18 +590,33 @@
     }
   };
 
-  recExportBtn.onclick=()=>{
+  recExportBtn.onclick=async ()=>{
+    const filename='piano-session-'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.json';
     const payload={
       exportedAt: new Date().toISOString(),
       cfg: {...cfg},
       calibration: loadCalibration(),
       events: recEvents
     };
-    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download='piano-session-'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.json';
-    a.click();
+    try{
+      const res = await fetch('/save', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({filename, data: payload})
+      });
+      const json = await res.json();
+      if(json.ok){
+        recExportBtn.textContent='Saved ✓';
+        setTimeout(()=>recExportBtn.textContent='Export JSON', 2000);
+      } else {
+        throw new Error(json.error);
+      }
+    } catch(e){
+      // Fallback: browser download if server not reachable
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob); a.download=filename; a.click();
+    }
   };
 
   recClearBtn.onclick=()=>{
