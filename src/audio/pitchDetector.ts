@@ -90,6 +90,18 @@ function dbToLinear(freqDb: Float32Array): Float32Array<ArrayBuffer> {
   return out;
 }
 
+/** Raw harmonic-template score for a single note (used by calibration capture). */
+export function noteScore(
+  freqDb: Float32Array,
+  sampleRate: number,
+  fftSize: number,
+  cfg: DetectorConfig,
+  midi: number,
+): number {
+  const spectrum = dbToLinear(freqDb);
+  return harmonicScore(spectrum, midi, sampleRate / fftSize, sampleRate / 2, cfg);
+}
+
 /**
  * Analyze one frequency-domain frame.
  * @param freqDb dB-magnitude spectrum from AnalyserNode.getFloatFrequencyData

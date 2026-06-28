@@ -16,10 +16,14 @@ export interface UseOsmd {
   /** MIDI numbers expected at the current cursor position (chord = multiple). */
   expectedMidi: number[];
   atEnd: boolean;
+  /** Title from the loaded score, if any. */
+  title: string;
   next: () => void;
   prev: () => void;
   reset: () => void;
   loadXml: (xml: string) => Promise<void>;
+  /** Load a user-picked file: .xml/.musicxml (text) or .mxl (compressed). */
+  loadFile: (file: File) => Promise<void>;
 }
 
 function frequencyToMidi(freq: number): number {
@@ -33,6 +37,7 @@ export function useOsmd(): UseOsmd {
   const [error, setError] = useState<string | null>(null);
   const [expectedMidi, setExpectedMidi] = useState<number[]>([]);
   const [atEnd, setAtEnd] = useState(false);
+  const [title, setTitle] = useState('');
 
   // Initialize OSMD when the container mounts. Cleanup nulls the ref and clears
   // the instance so a StrictMode remount rebinds to the fresh DOM node.
@@ -91,6 +96,7 @@ export function useOsmd(): UseOsmd {
         osmd.cursor.reset();
         setLoaded(true);
         setAtEnd(false);
+        setTitle(osmd.Sheet?.TitleString ?? '');
         readExpectedMidi();
       } catch (e) {
         if (osmdRef.current !== osmd) return; // error from a superseded instance
@@ -98,6 +104,24 @@ export function useOsmd(): UseOsmd {
       }
     },
     [readExpectedMidi],
+  );
+
+  const loadFile = useCallback(
+    async (file: File) => {
+      const name = file.name.toLowerCase();
+      if (name.endsWith('.mxl')) {
+        // Compressed MusicXML (zip). Read as bytes and hand OSMD a binary string;
+        // OSMD detects the zip magic (PK\x03\x04) and unzips it.
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        await loadXml(bin);
+      } else {
+        await loadXml(await file.text());
+      }
+    },
+    [loadXml],
   );
 
   const next = useCallback(() => {
@@ -128,9 +152,11 @@ export function useOsmd(): UseOsmd {
     error,
     expectedMidi,
     atEnd,
+    title,
     next,
     prev,
     reset,
     loadXml,
+    loadFile,
   };
 }

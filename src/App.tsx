@@ -1,17 +1,35 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOsmd } from './score/useOsmd';
 import { SAMPLE_C_MAJOR } from './score/sampleScore';
 import { noteName } from './lib/midi';
 import { useMic } from './audio/useMic';
 import { evaluateMatch } from './score/matcher';
 import { DetectorPanel } from './components/DetectorPanel';
+import { CalibrationWizard } from './components/CalibrationWizard';
+import {
+  boostMap,
+  calibLabel,
+  clearCalibration,
+  loadCalibration,
+  type CalibrationData,
+} from './audio/calibration';
 
 export default function App() {
   const osmd = useOsmd();
   const [practicing, setPracticing] = useState(false);
   const [justMatched, setJustMatched] = useState(false);
+  const [calibration, setCalibration] = useState<CalibrationData | null>(() => loadCalibration());
+  const [showCalib, setShowCalib] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const noteBoost = useMemo(() => boostMap(calibration), [calibration]);
+  const detectorConfig = useMemo(() => ({ noteBoost }), [noteBoost]);
+
   // Feed expected notes to the detector while practicing → score-informed verification.
-  const mic = useMic({ expected: practicing ? osmd.expectedMidi : null });
+  const mic = useMic({
+    expected: practicing ? osmd.expectedMidi : null,
+    detectorConfig,
+  });
 
   // Load the sample score once OSMD is ready.
   useEffect(() => {
@@ -58,9 +76,53 @@ export default function App() {
             textTransform: 'uppercase',
           }}
         >
-          Phase 2 · Practice Loop
+          Piano Practice
         </div>
-        <h1 style={{ fontSize: 18, margin: '4px 0 0' }}>Piano Practice</h1>
+        <h1 style={{ fontSize: 18, margin: '4px 0 10px' }}>{osmd.title || 'Piano Practice'}</h1>
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xml,.musicxml,.mxl"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) {
+                setPracticing(false);
+                void osmd.loadFile(f);
+              }
+              e.target.value = '';
+            }}
+          />
+          <button onClick={() => fileInputRef.current?.click()}>Load MusicXML…</button>
+          <button
+            onClick={() => {
+              setPracticing(false);
+              void osmd.loadXml(SAMPLE_C_MAJOR);
+            }}
+          >
+            Sample
+          </button>
+          <span style={{ width: 1, height: 22, background: 'var(--line)' }} />
+          <button onClick={() => setShowCalib(true)}>
+            {calibration ? 'Recalibrate' : 'Calibrate piano'}
+          </button>
+          {calibration && (
+            <span style={{ fontSize: 11, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>
+              {calibLabel(calibration) || 'calibrated'}
+              <button
+                onClick={() => {
+                  clearCalibration();
+                  setCalibration(null);
+                }}
+                style={{ marginLeft: 8, padding: '2px 8px', fontSize: 11 }}
+              >
+                clear
+              </button>
+            </span>
+          )}
+        </div>
       </header>
 
       {osmd.error && (
@@ -163,6 +225,13 @@ export default function App() {
       </div>
 
       <DetectorPanel mic={mic} />
+
+      {showCalib && (
+        <CalibrationWizard
+          onClose={() => setShowCalib(false)}
+          onSaved={(data) => setCalibration(data)}
+        />
+      )}
     </div>
   );
 }
