@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Piano Detector — Template-Matching Spike</title>
+<style>
+  /* ---- Instrument-panel aesthetic: warm charcoal, sodium-amber readout,
+         detection green, ivory keys. Grounded in tuners / VU meters / spectrum analyzers. ---- */
+  :root{
+    --bg:#1a1714;
+    --panel:#221e1a;
+    --line:#3a332c;
+    --ink:#e8e0d2;
+    --dim:#9b9082;
+    --amber:#f0a830;       /* sodium readout */
+    --amber-soft:#7a5a2a;
+    --green:#5fd47a;        /* confirmed detection */
+    --green-soft:#2a6b3a;
+    --ivory:#cfc6b4;
+    --sharp:#4a4339;
+    --mono:'SF Mono',ui-monospace,'Cascadia Mono','Roboto Mono',Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-text-size-adjust:100%}
+  body{padding:16px;max-width:980px;margin:0 auto}
+  h1{font-size:15px;font-weight:600;letter-spacing:.02em;margin:0}
+  .eyebrow{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:.18em;text-transform:uppercase;margin-bottom:4px}
+  header{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px;flex-wrap:wrap}
+
+  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button{font-family:var(--sans);font-weight:600;font-size:13px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:9px 16px;border-radius:7px;cursor:pointer;transition:.12s}
+  button:hover{border-color:var(--amber-soft)}
+  button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  button.primary{background:var(--amber);color:#1a1714;border-color:var(--amber)}
+  button.primary[data-on="true"]{background:var(--green);border-color:var(--green)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+
+  /* ---- Readout: the actual deliverable — what MIDI numbers are detected ---- */
+  .readout{font-family:var(--mono);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:14px 16px;margin-bottom:14px;min-height:58px}
+  .readout .label{font-size:10px;color:var(--dim);letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;align-items:center;min-height:26px}
+  .chip{font-family:var(--mono);font-size:14px;font-weight:600;padding:4px 10px;border-radius:6px;background:var(--green-soft);color:var(--green);border:1px solid var(--green)}
+  .chip .midi{color:var(--ink);opacity:.7;font-weight:400;margin-left:6px;font-size:12px}
+  .empty{color:var(--dim);font-size:13px;font-style:italic}
+
+  /* ---- Level meter ---- */
+  .meter{height:6px;background:#100e0c;border-radius:3px;overflow:hidden;margin-top:10px;border:1px solid var(--line)}
+  .meter > i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--green),var(--amber));transition:width .05s linear}
+  .meter.gated > i{background:var(--line)}
+
+  /* ---- Signature element: chromatic spectrum→keyboard strip ---- */
+  .keyboard{position:relative;height:200px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 8px 26px;display:flex;align-items:flex-end;gap:1px;overflow-x:auto;margin-bottom:16px}
+  .key{position:relative;flex:1 0 9px;min-width:7px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch}
+  .key .bar{width:100%;background:var(--amber-soft);border-radius:2px 2px 0 0;height:0%;transition:height .06s linear,background .06s}
+  .key.sharp .bar{background:#5a4a36}
+  .key.on .bar{background:var(--green);box-shadow:0 0 10px rgba(95,212,122,.5)}
+  .key .base{position:absolute;bottom:-1px;left:0;right:0;height:14px;border-radius:0 0 2px 2px}
+  .key.white .base{background:var(--ivory)}
+  .key.sharp .base{background:var(--sharp);height:9px}
+  .key.on.white .base{background:var(--green)}
+  .key.on.sharp .base{background:var(--green-soft)}
+  .key .oct{position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap}
+
+  /* ---- Settings ---- */
+  details{background:var(--panel);border:1px solid var(--line);border-radius:9px;margin-bottom:14px}
+  summary{padding:12px 16px;cursor:pointer;font-size:13px;font-weight:600;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:'▸ ';color:var(--amber)}
+  details[open] summary::before{content:'▾ '}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px 22px;padding:4px 16px 18px}
+  .ctl{display:flex;flex-direction:column;gap:5px}
+  .ctl label{font-size:12px;color:var(--dim);display:flex;justify-content:space-between}
+  .ctl label b{font-family:var(--mono);color:var(--amber);font-weight:600}
+  input[type=range]{width:100%;accent-color:var(--amber)}
+  select{font-family:var(--mono);background:#100e0c;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink)}
+
+  .note{font-size:12px;color:var(--dim);line-height:1.55;font-family:var(--mono);background:#100e0c;border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+  .note b{color:var(--amber)}
+  .err{color:#e57a6a}
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="eyebrow">Phase 0 · Audio Spike</div>
+      <h1>Polyphonic Piano Detector — harmonic template matching</h1>
+    </div>
+    <div class="controls">
+      <button id="startBtn" class="primary">Start mic</button>
+      <button id="stopBtn" disabled>Stop</button>
+    </div>
+  </header>
+
+  <div class="readout">
+    <div class="label">Detected now</div>
+    <div class="chips" id="chips"><span class="empty">Idle — press Start mic and play.</span></div>
+    <div class="meter" id="meter"><i id="meterFill"></i></div>
+  </div>
+
+  <div class="keyboard" id="keyboard"></div>
+
+  <details>
+    <summary>Tuning (adjust live on your real piano + room)</summary>
+    <div class="grid">
+      <div class="ctl">
+        <label>Sensitivity <b id="vSens">0.45</b></label>
+        <input type="range" id="sens" min="0.05" max="0.95" step="0.01" value="0.45">
+      </div>
+      <div class="ctl">
+        <label>Silence gate (RMS) <b id="vGate">0.010</b></label>
+        <input type="range" id="gate" min="0.001" max="0.08" step="0.001" value="0.010">
+      </div>
+      <div class="ctl">
+        <label>Harmonics counted <b id="vHarm">6</b></label>
+        <input type="range" id="harm" min="2" max="10" step="1" value="6">
+      </div>
+      <div class="ctl">
+        <label>Harmonic subtraction <b id="vOct">0.85</b></label>
+        <input type="range" id="oct" min="0" max="1" step="0.05" value="0.85">
+      </div>
+      <div class="ctl">
+        <label>FFT size (resolution vs. window)</label>
+        <select id="fft">
+          <option value="8192">8192 · ~5.4 Hz/bin · ~186 ms</option>
+          <option value="16384" selected>16384 · ~2.7 Hz/bin · ~372 ms</option>
+          <option value="32768">32768 · ~1.3 Hz/bin · ~743 ms</option>
+        </select>
+      </div>
+      <div class="ctl">
+        <label>Note range (MIDI) <b id="vRange">36–96</b></label>
+        <div style="display:flex;gap:8px">
+          <input type="range" id="lo" min="21" max="72" step="1" value="36" style="flex:1">
+          <input type="range" id="hi" min="48" max="108" step="1" value="96" style="flex:1">
+        </div>
+      </div>
+      <div class="ctl">
+        <label class="toggle"><input type="checkbox" id="fund" checked> Require fundamental present</label>
+        <label class="toggle"><input type="checkbox" id="hold"> Hold last detection 120 ms</label>
+      </div>
+    </div>
+  </details>
+
+  <div class="note" id="status">
+    <b>How to read this:</b> bars are each note's raw match score (ghosts included, so you can see them);
+    a key turns <span style="color:var(--green)">green</span> only when the greedy peel actually accepts it.
+    Play a triad: all three should go green together. If a chord tone is missing, push <b>Sensitivity</b> up
+    (keeps peeling quieter notes). If a ghost sneaks in green, raise <b>Harmonic subtraction</b>. If real chord
+    tones start dropping when you raise subtraction, you've found this method's ceiling — back it off.
+  </div>
+
+<script>
+(() => {
+  // ---------- Music helpers ----------
+  const A4 = 440;
+  const NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const SHARP = [false,true,false,true,false,false,true,false,true,false,true,false];
+  const midiToFreq = m => A4 * Math.pow(2, (m - 69) / 12);
+  const noteName = m => NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+
+  // ---------- State / config ----------
+  const cfg = {
+    sens:0.45, gate:0.010, harm:6, oct:0.85, fft:16384,
+    lo:36, hi:96, requireFund:true, hold:false
+  };
+  let audioCtx=null, analyser=null, stream=null, raf=null;
+  let freqDb=null, timeBuf=null;
+  let keyEls=[];           // index by midi
+  let lastSeen={};         // midi -> timestamp, for hold
+  let running=false;
+
+  // ---------- DOM ----------
+  const $ = id => document.getElementById(id);
+  const startBtn=$('startBtn'), stopBtn=$('stopBtn'), chips=$('chips');
+  const meter=$('meter'), meterFill=$('meterFill'), status=$('status'), kb=$('keyboard');
+
+  // ---------- Build keyboard strip ----------
+  function buildKeyboard(){
+    kb.innerHTML=''; keyEls=[];
+    for(let m=cfg.lo; m<=cfg.hi; m++){
+      const sharp = SHARP[((m%12)+12)%12];
+      const el=document.createElement('div');
+      el.className='key '+(sharp?'sharp':'white');
+      el.innerHTML='<div class="bar"></div><div class="base"></div>'+
+        ( (m%12===0) ? '<div class="oct">'+noteName(m)+'</div>' : '');
+      kb.appendChild(el);
+      keyEls[m]=el;
+    }
+  }
+
+  // ---------- Core: greedy polyphonic estimation with harmonic subtraction ----------
+  // freqDb: Float32Array of dB magnitudes. Returns {scores:Map midi->norm(display), detected:[midi]}
+  //
+  // Why greedy subtraction instead of "score every note, threshold the loudest":
+  // chord tones share partials and split the energy, so a fixed threshold drops the
+  // quieter notes. Instead we pick the strongest note, REMOVE the spectral energy it
+  // explains, then re-scan the residual. After C4's harmonics are subtracted, E4/G4
+  // are the strongest things left and get picked cleanly — and octave ghosts vanish,
+  // since the ghost's "fundamental" was a real note's harmonic that just got removed.
+  const MAX_POLYPHONY = 8;
+
+  function analyzeFrame(){
+    const sr=audioCtx.sampleRate, N=analyser.fftSize, binHz=sr/N, nyq=sr/2;
+
+    // Linear-magnitude residual spectrum we'll subtract from as notes are claimed.
+    const residual=new Float32Array(freqDb.length);
+    for(let b=0;b<freqDb.length;b++) residual[b]=Math.pow(10, freqDb[b]/20);
+
+    // bins covering harmonic h of fundamental f0 (±~10 cents, ≥1 bin: tuning + inharmonicity)
+    const harmBins=(f0,h)=>{
+      const fh=f0*h; if(fh>=nyq) return null;
+      const win=Math.max(binHz, fh*0.006);
+      return [ Math.max(0,Math.floor((fh-win)/binHz)),
+               Math.min(residual.length-1,Math.ceil((fh+win)/binHz)) ];
+    };
+    const peakIn=(lo,hi)=>{ let p=0; for(let b=lo;b<=hi;b++) if(residual[b]>p) p=residual[b]; return p; };
+
+    // Fundamental-dominant score: each genuine note owns a distinct fundamental, so it
+    // survives subtraction of shared UPPER partials; ghosts (no own f0) collapse.
+    function scoreNote(m){
+      const f0=midiToFreq(m);
+      let fund=0, upper=0;
+      for(let h=1;h<=cfg.harm;h++){
+        const hb=harmBins(f0,h); if(!hb) break;
+        const p=peakIn(hb[0],hb[1]);
+        if(h===1) fund=p; else upper += p/h;
+      }
+      return cfg.requireFund ? (fund + 0.5*upper) : (0.6*fund + 0.7*upper);
+    }
+
+    // Snapshot raw scores BEFORE subtraction, for the keyboard bars (shows ghosts too).
+    const display=new Map(); let dispMax=1e-9;
+    for(let m=cfg.lo;m<=cfg.hi;m++){ const s=scoreNote(m); display.set(m,s); if(s>dispMax)dispMax=s; }
+
+    // Greedy peel: pick strongest, subtract its harmonics, repeat.
+    const detected=[];
+    let firstScore=0;
+    const stopRatio = 0.18 - 0.15*cfg.sens;   // higher sensitivity => keeps picking quieter notes
+    for(let iter=0; iter<MAX_POLYPHONY; iter++){
+      let bestM=-1, best=0;
+      for(let m=cfg.lo;m<=cfg.hi;m++){ const s=scoreNote(m); if(s>best){best=s;bestM=m;} }
+      if(bestM<0 || best<=0) break;
+      if(iter===0) firstScore=best;
+      else if(best < stopRatio*firstScore) break;   // remaining peaks too weak vs strongest
+      detected.push(bestM);
+      // Subtract claimed harmonics. cfg.oct = subtraction strength: keep (1-oct) of each bin,
+      // leaving a little so shared-partial chord tones with their own f0 still register.
+      const f0=midiToFreq(bestM), keep=1-cfg.oct;
+      for(let h=1;h<=cfg.harm;h++){
+        const hb=harmBins(f0,h); if(!hb) break;
+        for(let b=hb[0];b<=hb[1];b++) residual[b]*=keep;
+      }
+    }
+
+    const scores=new Map();
+    display.forEach((v,k)=>scores.set(k, v/dispMax));   // normalized only for bar heights
+    return {scores, detected};
+  }
+
+  // ---------- Render loop ----------
+  function loop(){
+    if(!running) return;
+    raf=requestAnimationFrame(loop);
+
+    // RMS level for silence gate
+    analyser.getFloatTimeDomainData(timeBuf);
+    let sum=0; for(let i=0;i<timeBuf.length;i++) sum+=timeBuf[i]*timeBuf[i];
+    const rms=Math.sqrt(sum/timeBuf.length);
+    const gated = rms < cfg.gate;
+    meterFill.style.width=Math.min(100, rms*600)+'%';
+    meter.classList.toggle('gated', gated);
+
+    analyser.getFloatFrequencyData(freqDb);
+    let scores=new Map(), detected=[];
+    if(!gated){ const r=analyzeFrame(); scores=r.scores; detected=r.detected; }
+
+    // hold logic
+    const now=performance.now();
+    if(cfg.hold){
+      detected.forEach(m=>lastSeen[m]=now);
+      detected = Object.keys(lastSeen).map(Number).filter(m=> now-lastSeen[m] < 120);
+    }
+    const onSet=new Set(detected);
+
+    // paint keyboard
+    for(let m=cfg.lo;m<=cfg.hi;m++){
+      const el=keyEls[m]; if(!el) continue;
+      const s=scores.get(m)||0;
+      el.querySelector('.bar').style.height=Math.round(s*100)+'%';
+      el.classList.toggle('on', onSet.has(m));
+    }
+
+    // paint readout
+    if(detected.length){
+      detected.sort((a,b)=>a-b);
+      chips.innerHTML=detected.map(m=>
+        `<span class="chip">${noteName(m)}<span class="midi">${m}</span></span>`).join('');
+    } else {
+      chips.innerHTML = gated
+        ? '<span class="empty">Listening… (below silence gate)</span>'
+        : '<span class="empty">No note matched.</span>';
+    }
+  }
+
+  // ---------- Mic lifecycle ----------
+  async function start(){
+    try{
+      // CRITICAL: speech DSP defaults mangle music — turn all three off.
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }
+      });
+      audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx.state==='suspended') await audioCtx.resume();
+      const srcNode=audioCtx.createMediaStreamSource(stream);
+      analyser=audioCtx.createAnalyser();
+      analyser.fftSize=cfg.fft;
+      analyser.smoothingTimeConstant=0;       // we want responsiveness, not temporal blur
+      analyser.minDecibels=-100; analyser.maxDecibels=-10;
+      srcNode.connect(analyser);
+      freqDb=new Float32Array(analyser.frequencyBinCount);
+      timeBuf=new Float32Array(analyser.fftSize);
+
+      running=true; lastSeen={};
+      startBtn.disabled=true; startBtn.dataset.on='true'; startBtn.textContent='● Listening';
+      stopBtn.disabled=false;
+      status.innerHTML='<b>Mic live at '+Math.round(audioCtx.sampleRate)+' Hz.</b> '+
+        'Resolution ≈ '+(audioCtx.sampleRate/cfg.fft).toFixed(1)+' Hz/bin. '+
+        'Low notes (below ~C3) resolve worst — expect them last to behave.';
+      loop();
+    }catch(e){
+      status.innerHTML='<span class="err">Mic error: '+e.message+'</span><br>'+
+        'Needs a secure context: use <b>localhost</b> on desktop, or HTTPS (a tunnel) on your phone.';
+    }
+  }
+  function stop(){
+    running=false; if(raf) cancelAnimationFrame(raf);
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    if(audioCtx) audioCtx.close();
+    audioCtx=analyser=stream=null;
+    startBtn.disabled=false; startBtn.dataset.on='false'; startBtn.textContent='Start mic';
+    stopBtn.disabled=true;
+    chips.innerHTML='<span class="empty">Stopped.</span>';
+    for(let m=cfg.lo;m<=cfg.hi;m++){ const el=keyEls[m]; if(el){el.classList.remove('on');el.querySelector('.bar').style.height='0%';} }
+    meterFill.style.width='0%';
+  }
+
+  // ---------- Wire controls ----------
+  startBtn.onclick=start; stopBtn.onclick=stop;
+  const bind=(id,key,fmt,after)=>{ const el=$(id); el.oninput=()=>{ cfg[key]=parseFloat(el.value);
+    if(fmt) $(fmt).textContent = key==='gate'?cfg[key].toFixed(3):(key==='sens'||key==='oct'?cfg[key].toFixed(2):cfg[key]);
+    if(after) after(); }; };
+  bind('sens','sens','vSens'); bind('gate','gate','vGate');
+  bind('harm','harm','vHarm'); bind('oct','oct','vOct');
+  $('fft').onchange=()=>{ cfg.fft=parseInt($('fft').value); if(running){stop();} };
+  $('fund').onchange=e=>cfg.requireFund=e.target.checked;
+  $('hold').onchange=e=>{cfg.hold=e.target.checked; lastSeen={};};
+  const rangeUpd=()=>{ cfg.lo=parseInt($('lo').value); cfg.hi=parseInt($('hi').value);
+    if(cfg.hi<=cfg.lo+11){ cfg.hi=cfg.lo+12; $('hi').value=cfg.hi; }
+    $('vRange').textContent=cfg.lo+'–'+cfg.hi; buildKeyboard(); };
+  $('lo').oninput=rangeUpd; $('hi').oninput=rangeUpd;
+
+  buildKeyboard();
+})();
+</script>
+</body>
+</html>
