@@ -203,8 +203,8 @@
         <input type="range" id="harm" min="2" max="10" step="1" value="6">
       </div>
       <div class="ctl">
-        <label>Harmonic subtraction <b id="vOct">0.85</b></label>
-        <input type="range" id="oct" min="0" max="1" step="0.05" value="0.85">
+        <label>Harmonic subtraction <b id="vOct">0.75</b></label>
+        <input type="range" id="oct" min="0" max="1" step="0.05" value="0.75">
       </div>
       <div class="ctl">
         <label>FFT size (resolution vs. window)</label>
@@ -274,7 +274,7 @@
 
   // ---------- State / config ----------
   const cfg = {
-    sens:0.45, gate:0.010, harm:6, oct:0.85, fft:16384,
+    sens:0.45, gate:0.010, harm:6, oct:0.75, fft:16384,
     lo:36, hi:96, requireFund:true, stabFrames:3, onsetFluxRatio:2.5
   };
 
@@ -299,7 +299,8 @@
   // After onset: run detector for CAPTURE_FRAMES, vote, lock result.
   const ONSET_COOLDOWN_MS = 200; // min ms between onsets
   const CAPTURE_FRAMES = 10;    // frames after onset to collect votes (~165ms)
-  const CAPTURE_SKIP  = 3;      // skip first N frames — old note still dominant there
+  const CAPTURE_SKIP  = 1;      // skip first frame only — chords attack in frame 1,
+                                 // skipping 3 was discarding the cleanest chord data
   let prevSpectrum    = null;   // Float32Array of previous frame magnitudes
   let fluxSmooth      = 0;      // smoothed flux baseline
   let lastOnsetMs     = -9999;
