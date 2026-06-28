@@ -377,28 +377,46 @@
       }
     }
 
-    // Neighbor suppression: among accepted notes, drop any note that has a
-    // stronger accepted neighbor within 2 semitones. Real chord tones (C-E-G)
-    // are always 3+ semitones apart; semitone ghosts caused by harmonic bleed
-    // are always weaker than the real note that generated them.
-    const detectedSet = new Set(detected);
-    const peelScores = new Map();
-    // Re-score on ORIGINAL residual snapshot isn't available, so use display scores
-    // (pre-subtraction), which still correctly rank real notes above their neighbors.
-    detected.forEach(m => peelScores.set(m, display.get(m)||0));
+    // Post-processing: remove ghost notes using two rules.
+    // Use pre-subtraction display scores to rank notes.
+    detected.forEach(m => {});  // (scores already in display map)
+    const peelScores = m => display.get(m)||0;
 
+    // Rule 1 — Neighbor suppression: drop weaker note when two accepted notes
+    // are within 2 semitones. Real chord tones are always 3+ semitones apart.
     const suppressed = new Set();
     for(const m of detected){
       if(suppressed.has(m)) continue;
       for(const n of detected){
         if(n === m || suppressed.has(n)) continue;
         if(Math.abs(n - m) <= 2){
-          // Drop the weaker of the two
-          if((peelScores.get(m)||0) >= (peelScores.get(n)||0)) suppressed.add(n);
+          if(peelScores(m) >= peelScores(n)) suppressed.add(n);
           else suppressed.add(m);
         }
       }
     }
+
+    // Rule 2 — Harmonic ghost suppression: drop a note if a stronger accepted
+    // note's harmonic series explains it (octave ×2, fifth ×1.5, etc.).
+    // Tolerance: 25 cents (freq ratio within 1.4%).
+    const HARMONIC_RATIOS = [2.0, 3.0, 1.5, 2.5, 4.0];
+    const RATIO_TOL = 0.014;
+    for(const strong of detected){
+      if(suppressed.has(strong)) continue;
+      const fStrong = midiToFreq(strong);
+      for(const candidate of detected){
+        if(candidate === strong || suppressed.has(candidate)) continue;
+        if(peelScores(candidate) >= peelScores(strong)) continue; // only suppress weaker
+        const ratio = midiToFreq(candidate) / fStrong;
+        for(const hr of HARMONIC_RATIOS){
+          if(Math.abs(ratio - hr) / hr < RATIO_TOL){
+            suppressed.add(candidate);
+            break;
+          }
+        }
+      }
+    }
+
     const filteredDetected = detected.filter(m => !suppressed.has(m));
 
     const scores=new Map();
