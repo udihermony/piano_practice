@@ -105,6 +105,21 @@
   .calib-actions{display:flex;gap:10px;justify-content:center}
   .calib-skip{font-size:12px;color:var(--dim);margin-top:14px;cursor:pointer;text-decoration:underline}
   .calib-result{font-size:13px;color:var(--green);margin-top:12px;min-height:18px}
+
+  /* ---- Calibration storage panel ---- */
+  #calibStore{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+    padding:14px 16px;margin-bottom:14px;font-family:var(--mono);font-size:12px}
+  #calibStore .cs-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  #calibStore .cs-title{font-size:10px;color:var(--dim);letter-spacing:.16em;text-transform:uppercase}
+  #calibStore .cs-actions{display:flex;gap:8px}
+  #calibStore button{font-size:11px;padding:4px 10px}
+  #calibStore .cs-empty{color:var(--dim);font-style:italic}
+  #calibStore table{width:100%;border-collapse:collapse}
+  #calibStore td,#calibStore th{padding:3px 8px;text-align:left;border-bottom:1px solid var(--line)}
+  #calibStore th{color:var(--dim);font-size:10px;font-weight:400;letter-spacing:.1em;text-transform:uppercase}
+  #calibStore .boost-high{color:var(--amber)}
+  #calibStore .boost-ok{color:var(--green)}
+  #calibStore .cs-meta{color:var(--dim);margin-top:8px;font-size:11px}
 </style>
 </head>
 <body>
@@ -127,6 +142,17 @@
   </div>
 
   <div class="keyboard" id="keyboard"></div>
+
+  <!-- Calibration storage panel -->
+  <div id="calibStore">
+    <div class="cs-header">
+      <div class="cs-title">Calibration data</div>
+      <div class="cs-actions">
+        <button id="calibClearBtn">Clear</button>
+      </div>
+    </div>
+    <div id="calibStoreBody"><span class="cs-empty">No calibration saved yet.</span></div>
+  </div>
 
   <details>
     <summary>Tuning (adjust live on your real piano + room)</summary>
@@ -219,8 +245,8 @@
   };
 
   // Per-note calibration boosts: midi -> score multiplier (default 1.0)
-  // Calibration sets this based on observed signal strength.
   const noteBoost = {};
+  const STORAGE_KEY = 'piano_calibration_v1';
 
   let audioCtx=null, analyser=null, stream=null, raf=null;
   let freqDb=null, timeBuf=null;
@@ -444,6 +470,71 @@
   buildKeyboard();
 
   // =====================================================================
+  // CALIBRATION STORAGE
+  // =====================================================================
+
+  function saveCalibration(data){
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    renderCalibStore();
+  }
+
+  function loadCalibration(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch(e){ return null; }
+  }
+
+  function clearCalibration(){
+    localStorage.removeItem(STORAGE_KEY);
+    Object.keys(noteBoost).forEach(k=>delete noteBoost[k]);
+    renderCalibStore();
+  }
+
+  function renderCalibStore(){
+    const data = loadCalibration();
+    const body = $('calibStoreBody');
+    if(!data){
+      body.innerHTML='<span class="cs-empty">No calibration saved yet.</span>';
+      return;
+    }
+    const rows = data.notes.map(n=>{
+      const boost = n.boost.toFixed(2);
+      const cls = n.boost > 1.5 ? 'boost-high' : 'boost-ok';
+      const peaks = n.peaks.map(p=>(p*100).toFixed(0)+'%').join(', ');
+      return `<tr>
+        <td>${noteName(n.midi)}</td>
+        <td style="color:var(--dim)">${n.midi}</td>
+        <td class="${cls}">×${boost}</td>
+        <td style="color:var(--dim)">${peaks}</td>
+      </tr>`;
+    }).join('');
+    body.innerHTML=`
+      <table>
+        <thead><tr><th>Note</th><th>MIDI</th><th>Boost</th><th>Peaks (per strike)</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="cs-meta">Saved ${new Date(data.savedAt).toLocaleString()} · sensitivity ${data.sensitivity.toFixed(2)}</div>`;
+  }
+
+  function applyStoredCalibration(){
+    const data = loadCalibration();
+    if(!data) return;
+    data.notes.forEach(n=>{ noteBoost[n.midi] = n.boost; });
+    cfg.sens = data.sensitivity;
+    $('sens').value = cfg.sens;
+    $('vSens').textContent = cfg.sens.toFixed(2);
+  }
+
+  $('calibClearBtn').onclick = ()=>{
+    if(confirm('Clear saved calibration?')) clearCalibration();
+  };
+
+  // Restore on page load
+  applyStoredCalibration();
+  renderCalibStore();
+
+  // =====================================================================
   // CALIBRATION WIZARD
   // =====================================================================
   // Strategy: ask user to play each calibration note 3 times.
@@ -617,6 +708,17 @@
       cfg.sens = Math.max(0.30, cfg.sens - 0.08);
       $('sens').value=cfg.sens; $('vSens').textContent=cfg.sens.toFixed(2);
     }
+
+    // Persist to localStorage
+    saveCalibration({
+      savedAt: Date.now(),
+      sensitivity: cfg.sens,
+      notes: CALIB_NOTES.map(m=>({
+        midi: m,
+        boost: noteBoost[m] || 1.0,
+        peaks: calibPeaks[m] || []
+      }))
+    });
 
     $('calibTitle').textContent='Calibration complete';
     $('calibSub').textContent='The detector has been tuned for your piano. '+
