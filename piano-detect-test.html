@@ -253,14 +253,25 @@
   let keyEls=[];
   let running=false;
 
-  // Stability filter: separate onset and release delays.
-  // A note turns ON after stabFrames consecutive hits.
-  // A note turns OFF after RELEASE_FRAMES consecutive misses.
-  // This prevents single-frame gaps from causing flicker.
-  const RELEASE_FRAMES = 8;  // ~130ms of silence before a note goes dark
-  const stabCount = {};    // midi -> consecutive hit frames (onset counter)
-  const missCount = {};    // midi -> consecutive miss frames (release counter)
-  const confirmed = {};    // midi -> bool (currently confirmed-on)
+  // Stability filter (used only during onset capture window)
+  const RELEASE_FRAMES = 8;
+  const stabCount = {};
+  const missCount = {};
+  const confirmed = {};
+
+  // Onset detection + hold
+  // Strategy: detect a sharp RMS rise → run the detector for a short capture
+  // window (CAPTURE_FRAMES) → lock those notes in until the next onset or silence.
+  // The attack frame has the cleanest harmonic profile; sustain drifts and confuses.
+  const ONSET_RATIO   = 1.8;   // RMS must rise by this factor vs smoothed level
+  const ONSET_COOLDOWN_MS = 250; // ignore re-triggers within this window
+  const CAPTURE_FRAMES = 6;    // frames to collect after onset before locking (~100ms)
+  let rmsSmooth       = 0;
+  let lastOnsetMs     = -9999;
+  let captureFramesLeft = 0;
+  let captureVotes    = {};    // midi -> hit count during capture window
+  let heldNotes       = [];    // locked detection result
+  let heldScores      = new Map();
 
   // ---------- DOM ----------
   const $ = id => document.getElementById(id);
@@ -372,38 +383,69 @@
     meter.classList.toggle('gated', gated);
 
     analyser.getFloatFrequencyData(freqDb);
-    let scores=new Map(), stableDetected=[];
-    if(!gated){
-      const r=analyzeFrame();
-      scores=r.scores;
-      stableDetected=applyStability(r.detected);
+
+    if(gated){
+      // Silence: clear everything
+      rmsSmooth = 0; captureFramesLeft = 0; captureVotes = {};
+      heldNotes = []; heldScores = new Map();
     } else {
-      // Reset stability when silent
-      for(let m=cfg.lo;m<=cfg.hi;m++){ stabCount[m]=0; missCount[m]=0; confirmed[m]=false; }
+      const now = performance.now();
+
+      // Onset detection: did RMS spike sharply above the smoothed baseline?
+      const isOnset = rmsSmooth > 0
+        && rms > rmsSmooth * ONSET_RATIO
+        && (now - lastOnsetMs) > ONSET_COOLDOWN_MS;
+
+      // Smooth RMS slowly (time constant ~200ms) so sustained notes don't
+      // raise the baseline fast enough to block the next onset.
+      rmsSmooth = rmsSmooth === 0 ? rms : rmsSmooth * 0.92 + rms * 0.08;
+
+      if(isOnset){
+        lastOnsetMs = now;
+        captureFramesLeft = CAPTURE_FRAMES;
+        captureVotes = {};
+      }
+
+      // During capture window: run detector and vote
+      if(captureFramesLeft > 0){
+        const r = analyzeFrame();
+        heldScores = r.scores;
+        r.detected.forEach(m=>{ captureVotes[m] = (captureVotes[m]||0) + 1; });
+        captureFramesLeft--;
+
+        if(captureFramesLeft === 0){
+          // Lock in notes that were detected in majority of capture frames
+          const threshold = Math.ceil(CAPTURE_FRAMES * 0.5);
+          heldNotes = Object.entries(captureVotes)
+            .filter(([,v])=>v >= threshold)
+            .map(([m])=>parseInt(m))
+            .sort((a,b)=>a-b);
+        }
+      }
     }
-    const onSet=new Set(stableDetected);
+
+    const onSet = new Set(heldNotes);
 
     // Paint keyboard
     for(let m=cfg.lo;m<=cfg.hi;m++){
       const el=keyEls[m]; if(!el) continue;
-      const s=scores.get(m)||0;
+      const s=heldScores.get(m)||0;
       el.querySelector('.bar').style.height=Math.round(s*100)+'%';
       el.classList.toggle('on', onSet.has(m));
     }
 
     // Paint readout
-    if(stableDetected.length){
-      stableDetected.sort((a,b)=>a-b);
-      chips.innerHTML=stableDetected.map(m=>
+    if(heldNotes.length){
+      chips.innerHTML=heldNotes.map(m=>
         `<span class="chip">${noteName(m)}<span class="midi">${m}</span></span>`).join('');
     } else {
       chips.innerHTML = gated
         ? '<span class="empty">Listening… (below silence gate)</span>'
-        : '<span class="empty">No note matched.</span>';
+        : '<span class="empty">Waiting for a note onset…</span>';
     }
 
     // Forward frames to calibration listener if active
-    if(calibListening && !gated) calibOnFrame(scores, rms);
+    if(calibListening && !gated) calibOnFrame(heldScores, rms);
   }
 
   // ---------- Mic lifecycle ----------
