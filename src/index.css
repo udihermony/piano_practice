@@ -1,0 +1,56 @@
+:root {
+  /* Instrument-panel palette, carried over from the Phase 0 prototype. */
+  --bg: #1a1714;
+  --panel: #221e1a;
+  --line: #3a332c;
+  --ink: #e8e0d2;
+  --dim: #9b9082;
+  --amber: #f0a830;
+  --green: #5fd47a;
+  --red: #e57a6a;
+  --mono: 'SF Mono', ui-monospace, 'Cascadia Mono', 'Roboto Mono', Menlo, Consolas, monospace;
+  --sans: ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-text-size-adjust: 100%;
+}
+
+#root {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+button {
+  font-family: var(--sans);
+  font-weight: 600;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 9px 16px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: 0.12s;
+}
+button:hover:not(:disabled) { border-color: var(--amber); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.primary { background: var(--amber); color: #1a1714; border-color: var(--amber); }
+
+/* OSMD renders into a white-ish SVG; give it a surface so it reads on dark bg. */
+.score-surface {
+  background: #f7f3ea;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px;
+  overflow-x: auto;
+}

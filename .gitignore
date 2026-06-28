@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+*.tsbuildinfo
+
+# Phase 0 prototype: recorded test sessions stay local
+prototype/sessions/
