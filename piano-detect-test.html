@@ -120,6 +120,22 @@
   #calibStore .boost-high{color:var(--amber)}
   #calibStore .boost-ok{color:var(--green)}
   #calibStore .cs-meta{color:var(--dim);margin-top:8px;font-size:11px}
+
+  /* ---- Session recorder ---- */
+  #recorder{background:var(--panel);border:1px solid var(--line);border-radius:9px;
+    padding:14px 16px;margin-bottom:14px;font-family:var(--mono);font-size:12px}
+  #recorder .rec-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  #recorder .rec-title{font-size:10px;color:var(--dim);letter-spacing:.16em;text-transform:uppercase}
+  #recorder .rec-actions{display:flex;gap:8px;align-items:center}
+  #recorder button{font-size:11px;padding:4px 10px}
+  .rec-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--line);margin-right:6px}
+  .rec-dot.active{background:#e57a6a;box-shadow:0 0 6px #e57a6a88;animation:blink 1s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+  #recLog{max-height:140px;overflow-y:auto;color:var(--dim);line-height:1.7}
+  #recLog .ev{display:flex;gap:10px}
+  #recLog .ev-time{color:var(--amber-soft);min-width:52px}
+  #recLog .ev-notes{color:var(--ink)}
+  #recLog .ev-scores{color:var(--dim);font-size:11px}
 </style>
 </head>
 <body>
@@ -142,6 +158,19 @@
   </div>
 
   <div class="keyboard" id="keyboard"></div>
+
+  <!-- Session recorder -->
+  <div id="recorder">
+    <div class="rec-header">
+      <div class="rec-title"><span class="rec-dot" id="recDot"></span>Session recorder</div>
+      <div class="rec-actions">
+        <button id="recToggleBtn" disabled>Start recording</button>
+        <button id="recExportBtn" disabled>Export JSON</button>
+        <button id="recClearBtn">Clear</button>
+      </div>
+    </div>
+    <div id="recLog"><span style="color:var(--dim);font-style:italic">No events yet.</span></div>
+  </div>
 
   <!-- Calibration storage panel -->
   <div id="calibStore">
@@ -272,6 +301,11 @@
   let captureVotes    = {};    // midi -> hit count during capture window
   let heldNotes       = [];    // locked detection result
   let heldScores      = new Map();
+
+  // ---------- Session recorder ----------
+  let recActive = false;
+  let recStartMs = 0;
+  let recEvents = [];   // [{t, notes:[{midi,name,score}], rms, votes}]
 
   // ---------- DOM ----------
   const $ = id => document.getElementById(id);
@@ -420,6 +454,29 @@
             .filter(([,v])=>v >= threshold)
             .map(([m])=>parseInt(m))
             .sort((a,b)=>a-b);
+
+          // Record the event
+          if(recActive){
+            const t = (performance.now() - recStartMs) / 1000;
+            const ev = {
+              t: parseFloat(t.toFixed(3)),
+              notes: heldNotes.map(m=>({
+                midi: m,
+                name: noteName(m),
+                score: parseFloat((heldScores.get(m)||0).toFixed(3)),
+                votes: captureVotes[m] || 0
+              })),
+              rms: parseFloat(rms.toFixed(4)),
+              allVotes: Object.fromEntries(
+                Object.entries(captureVotes)
+                  .sort(([,a],[,b])=>b-a)
+                  .slice(0, 12)
+                  .map(([m,v])=>[noteName(parseInt(m))+'('+m+')', v])
+              )
+            };
+            recEvents.push(ev);
+            appendRecLog(ev);
+          }
         }
       }
     }
@@ -467,7 +524,7 @@
 
       running=true;
       startBtn.disabled=true; startBtn.dataset.on='true'; startBtn.textContent='● Listening';
-      stopBtn.disabled=false; calibBtn.disabled=false;
+      stopBtn.disabled=false; calibBtn.disabled=false; recToggleBtn.disabled=false;
       status.innerHTML='<b>Mic live at '+Math.round(audioCtx.sampleRate)+' Hz.</b> '+
         'Resolution ≈ '+(audioCtx.sampleRate/cfg.fft).toFixed(1)+' Hz/bin · '+
         'Stability: '+cfg.stabFrames+' frames (~'+(cfg.stabFrames*16).toFixed(0)+' ms). '+
@@ -485,6 +542,8 @@
     audioCtx=analyser=stream=null;
     startBtn.disabled=false; startBtn.dataset.on='false'; startBtn.textContent='Start mic';
     stopBtn.disabled=true; calibBtn.disabled=true;
+    recToggleBtn.disabled=true;
+    if(recActive){ recActive=false; recToggleBtn.textContent='Start recording'; recDot.classList.remove('active'); }
     chips.innerHTML='<span class="empty">Stopped.</span>';
     for(let m=cfg.lo;m<=cfg.hi;m++){
       const el=keyEls[m]; if(el){el.classList.remove('on');el.querySelector('.bar').style.height='0%';}
@@ -510,6 +569,63 @@
   $('lo').oninput=rangeUpd; $('hi').oninput=rangeUpd;
 
   buildKeyboard();
+
+  // =====================================================================
+  // SESSION RECORDER
+  // =====================================================================
+
+  const recToggleBtn=$('recToggleBtn'), recExportBtn=$('recExportBtn'), recClearBtn=$('recClearBtn');
+  const recDot=$('recDot'), recLog=$('recLog');
+
+  recToggleBtn.onclick=()=>{
+    recActive=!recActive;
+    if(recActive){
+      recStartMs=performance.now();
+      recToggleBtn.textContent='Stop recording';
+      recDot.classList.add('active');
+      recExportBtn.disabled=false;
+    } else {
+      recToggleBtn.textContent='Start recording';
+      recDot.classList.remove('active');
+    }
+  };
+
+  recExportBtn.onclick=()=>{
+    const payload={
+      exportedAt: new Date().toISOString(),
+      cfg: {...cfg},
+      calibration: loadCalibration(),
+      events: recEvents
+    };
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='piano-session-'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.json';
+    a.click();
+  };
+
+  recClearBtn.onclick=()=>{
+    recEvents=[];
+    recLog.innerHTML='<span style="color:var(--dim);font-style:italic">No events yet.</span>';
+    recExportBtn.disabled=true;
+  };
+
+  function appendRecLog(ev){
+    if(recLog.querySelector('span')) recLog.innerHTML='';
+    const accepted = ev.notes.map(n=>n.name).join(' ');
+    const topVotes = Object.entries(ev.allVotes).slice(0,6)
+      .map(([n,v])=>n+':'+v).join('  ');
+    const div=document.createElement('div');
+    div.className='ev';
+    div.innerHTML=
+      `<span class="ev-time">${ev.t.toFixed(2)}s</span>`+
+      `<span class="ev-notes">${accepted||'(none)'}</span>`+
+      `<span class="ev-scores">${topVotes}</span>`;
+    recLog.appendChild(div);
+    recLog.scrollTop=recLog.scrollHeight;
+  }
+
+  // Enable record button when mic is live (wired in start/stop)
 
   // =====================================================================
   // CALIBRATION STORAGE
