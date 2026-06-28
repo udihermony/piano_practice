@@ -34,14 +34,24 @@ export function useOsmd(): UseOsmd {
   const [expectedMidi, setExpectedMidi] = useState<number[]>([]);
   const [atEnd, setAtEnd] = useState(false);
 
-  // Initialize OSMD once the container is mounted.
+  // Initialize OSMD when the container mounts. Cleanup nulls the ref and clears
+  // the instance so a StrictMode remount rebinds to the fresh DOM node.
   useEffect(() => {
-    if (!containerRef.current || osmdRef.current) return;
-    osmdRef.current = new OpenSheetMusicDisplay(containerRef.current, {
+    if (!containerRef.current) return;
+    const instance = new OpenSheetMusicDisplay(containerRef.current, {
       autoResize: true,
       backend: 'svg',
       drawTitle: true,
     });
+    osmdRef.current = instance;
+    return () => {
+      osmdRef.current = null;
+      try {
+        instance.clear();
+      } catch {
+        /* instance may already be torn down */
+      }
+    };
   }, []);
 
   const readExpectedMidi = useCallback(() => {
@@ -72,6 +82,10 @@ export function useOsmd(): UseOsmd {
       setLoaded(false);
       try {
         await osmd.load(xml);
+        // A StrictMode remount may have disposed this instance mid-load; if the
+        // ref no longer points to it, bail silently — the remounted instance will
+        // load again on its own effect run.
+        if (osmdRef.current !== osmd) return;
         osmd.render();
         osmd.cursor.show();
         osmd.cursor.reset();
@@ -79,6 +93,7 @@ export function useOsmd(): UseOsmd {
         setAtEnd(false);
         readExpectedMidi();
       } catch (e) {
+        if (osmdRef.current !== osmd) return; // error from a superseded instance
         setError(e instanceof Error ? e.message : String(e));
       }
     },

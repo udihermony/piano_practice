@@ -4,9 +4,8 @@
  * extraction before we wire in real file loading.
  */
 export const SAMPLE_C_MAJOR = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
 <score-partwise version="4.0">
-  <work><work-title>C Major — scale & triad</work-title></work>
+  <work><work-title>C Major — scale and triad</work-title></work>
   <part-list>
     <score-part id="P1"><part-name>Piano</part-name></score-part>
   </part-list>
