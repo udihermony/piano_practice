@@ -294,7 +294,7 @@
   // The attack frame has the cleanest harmonic profile; sustain drifts and confuses.
   const ONSET_RATIO   = 1.8;   // RMS must rise by this factor vs smoothed level
   const ONSET_COOLDOWN_MS = 250; // ignore re-triggers within this window
-  const CAPTURE_FRAMES = 6;    // frames to collect after onset before locking (~100ms)
+  const CAPTURE_FRAMES = 10;   // frames to collect after onset before locking (~165ms)
   let rmsSmooth       = 0;
   let lastOnsetMs     = -9999;
   let captureFramesLeft = 0;
@@ -491,7 +491,7 @@
 
         if(captureFramesLeft === 0){
           // Lock in notes that were detected in majority of capture frames
-          const threshold = Math.ceil(CAPTURE_FRAMES * 0.5);
+          const threshold = Math.ceil(CAPTURE_FRAMES * 0.6);
           heldNotes = Object.entries(captureVotes)
             .filter(([,v])=>v >= threshold)
             .map(([m])=>parseInt(m))
