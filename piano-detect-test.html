@@ -227,11 +227,14 @@
   let keyEls=[];
   let running=false;
 
-  // Stability filter: track how many consecutive frames each note was detected.
-  // A note is "confirmed" only after stabFrames consecutive hits.
-  // On miss, count resets to 0.
-  const stabCount = {};   // midi -> consecutive frame count
-  const confirmed = {};   // midi -> bool (currently confirmed-on)
+  // Stability filter: separate onset and release delays.
+  // A note turns ON after stabFrames consecutive hits.
+  // A note turns OFF after RELEASE_FRAMES consecutive misses.
+  // This prevents single-frame gaps from causing flicker.
+  const RELEASE_FRAMES = 8;  // ~130ms of silence before a note goes dark
+  const stabCount = {};    // midi -> consecutive hit frames (onset counter)
+  const missCount = {};    // midi -> consecutive miss frames (release counter)
+  const confirmed = {};    // midi -> bool (currently confirmed-on)
 
   // ---------- DOM ----------
   const $ = id => document.getElementById(id);
@@ -316,10 +319,13 @@
     for(let m=cfg.lo; m<=cfg.hi; m++){
       if(rawSet.has(m)){
         stabCount[m] = (stabCount[m]||0) + 1;
+        missCount[m] = 0;
         if(stabCount[m] >= cfg.stabFrames) confirmed[m] = true;
       } else {
+        missCount[m] = (missCount[m]||0) + 1;
         stabCount[m] = 0;
-        confirmed[m] = false;
+        if(missCount[m] >= RELEASE_FRAMES) confirmed[m] = false;
+        // else: still confirmed — ride out the gap
       }
     }
     const result=[];
@@ -347,7 +353,7 @@
       stableDetected=applyStability(r.detected);
     } else {
       // Reset stability when silent
-      for(let m=cfg.lo;m<=cfg.hi;m++){ stabCount[m]=0; confirmed[m]=false; }
+      for(let m=cfg.lo;m<=cfg.hi;m++){ stabCount[m]=0; missCount[m]=0; confirmed[m]=false; }
     }
     const onSet=new Set(stableDetected);
 
