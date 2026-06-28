@@ -23,6 +23,32 @@ function libraryManifest(): Plugin {
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify(files.sort()));
       });
+
+      // Diagnostics: save a recorded detection session to ./sessions for inspection.
+      server.middlewares.use('/save-session', (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          res.end(JSON.stringify({ ok: false, error: 'POST only' }));
+          return;
+        }
+        let body = '';
+        req.on('data', (c) => (body += c));
+        req.on('end', () => {
+          try {
+            const { filename, data } = JSON.parse(body);
+            const dir = path.resolve(import.meta.dirname, 'sessions');
+            fs.mkdirSync(dir, { recursive: true });
+            const safe = path.basename(String(filename || `session-${Date.now()}.json`));
+            const out = path.join(dir, safe);
+            fs.writeFileSync(out, JSON.stringify(data ?? {}, null, 2));
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ ok: true, path: `sessions/${safe}` }));
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ ok: false, error: String(e) }));
+          }
+        });
+      });
     },
   };
 }

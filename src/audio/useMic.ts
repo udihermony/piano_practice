@@ -1,10 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   analyzeSpectrum,
-  verifyExpected,
+  verifyExpectedDetailed,
   DEFAULT_DETECTOR_CONFIG,
   type DetectorConfig,
 } from './pitchDetector';
+import { noteName } from '../lib/midi';
+
+const round = (n: number) => Math.round(n * 1000) / 1000;
+
+/** One recorded detection event, for diagnosing why notes are missed. */
+export interface RecordedEvent {
+  t: number; // seconds since recording start
+  fluxRatio: number; // onset strength that triggered this capture
+  expected: number[];
+  /** Per expected note: peak raw score over the window + the thresholds it faced. */
+  notes: {
+    midi: number;
+    name: string;
+    peakScore: number;
+    relThreshold: number;
+    floorThreshold: number;
+    votes: number;
+    present: boolean;
+  }[];
+  /** Notes locked in (verified present). */
+  locked: number[];
+  matched: boolean;
+}
 
 /**
  * Mic capture + onset-triggered detection, ported from the Phase 0 prototype.
@@ -53,6 +76,14 @@ export interface UseMic {
   gated: boolean;
   start: () => Promise<void>;
   stop: () => void;
+  // Diagnostics recorder
+  recording: boolean;
+  eventCount: number;
+  startRecording: () => void;
+  stopRecording: () => void;
+  clearRecording: () => void;
+  /** Save the session to the dev server (sessions/), falling back to download. */
+  exportSession: (meta?: Record<string, unknown>) => Promise<string>;
 }
 
 const ONSET_COOLDOWN_MS = 200;
@@ -87,6 +118,18 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
   const captureLeftRef = useRef(0);
   const captureVotesRef = useRef<Record<number, number>>({});
   const heldRef = useRef<number[]>([]);
+
+  // Diagnostics recorder
+  const [recording, setRecording] = useState(false);
+  const [eventCount, setEventCount] = useState(0);
+  const recordingRef = useRef(false);
+  const eventsRef = useRef<RecordedEvent[]>([]);
+  const recStartRef = useRef(0);
+  const onsetFluxRef = useRef(0);
+  // Per-expected accumulation during the current capture window.
+  const captureDetailRef = useRef<
+    Record<number, { peakScore: number; relThreshold: number; floorThreshold: number }>
+  >({});
 
   // Keep the detector config current without restarting the loop.
   const cfgRef = useRef<DetectorConfig>({ ...DEFAULT_DETECTOR_CONFIG });
@@ -159,6 +202,8 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
       lastOnsetRef.current = now;
       captureLeftRef.current = CAPTURE_FRAMES;
       captureVotesRef.current = {};
+      captureDetailRef.current = {};
+      onsetFluxRef.current = fluxRatio;
     }
 
     // 3. Capture-window voting
@@ -169,7 +214,27 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
       // Score-informed when practicing (verify expected pitches), else full transcription.
       let frameDetected: number[];
       if (expected && expected.length > 0) {
-        frameDetected = verifyExpected(freqDb, ctx.sampleRate, analyser.fftSize, cfgRef.current, expected);
+        const detail = verifyExpectedDetailed(
+          freqDb,
+          ctx.sampleRate,
+          analyser.fftSize,
+          cfgRef.current,
+          expected,
+        );
+        frameDetected = detail.notes.filter((n) => n.present).map((n) => n.midi);
+        // Track peak score + thresholds per expected note for the recorder.
+        if (recordingRef.current && frameIdx >= CAPTURE_SKIP) {
+          for (const n of detail.notes) {
+            const cur = captureDetailRef.current[n.midi];
+            if (!cur || n.score > cur.peakScore) {
+              captureDetailRef.current[n.midi] = {
+                peakScore: n.score,
+                relThreshold: n.relThreshold,
+                floorThreshold: n.floorThreshold,
+              };
+            }
+          }
+        }
       } else {
         const result = analyzeSpectrum(freqDb, ctx.sampleRate, analyser.fftSize, cfgRef.current);
         setScores(result.scores);
@@ -193,6 +258,34 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
         heldRef.current = locked;
         setHeldNotes(locked);
         if (locked.length > 0) setDetectionId((id) => id + 1);
+
+        // Record the event (practice/expected mode only — that's what we diagnose).
+        const expected = expectedRef.current;
+        if (recordingRef.current && expected && expected.length > 0) {
+          const lockedSet = new Set(locked);
+          const notes = expected.map((m) => {
+            const d = captureDetailRef.current[m];
+            return {
+              midi: m,
+              name: noteName(m),
+              peakScore: d ? round(d.peakScore) : 0,
+              relThreshold: d ? round(d.relThreshold) : 0,
+              floorThreshold: d ? round(d.floorThreshold) : 0,
+              votes: captureVotesRef.current[m] ?? 0,
+              present: lockedSet.has(m),
+            };
+          });
+          const matched = expected.every((m) => lockedSet.has(m));
+          eventsRef.current.push({
+            t: round((now - recStartRef.current) / 1000),
+            fluxRatio: round(onsetFluxRef.current),
+            expected: [...expected],
+            notes,
+            locked,
+            matched,
+          });
+          setEventCount(eventsRef.current.length);
+        }
       }
     }
   }, [gate, onsetFluxRatio]);
@@ -250,5 +343,68 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
   // Clean up on unmount.
   useEffect(() => stop, [stop]);
 
-  return { running, error, heldNotes, detectionId, scores, level, gated, start, stop };
+  // ---- Recorder controls ----
+  const startRecording = useCallback(() => {
+    eventsRef.current = [];
+    setEventCount(0);
+    recStartRef.current = performance.now();
+    recordingRef.current = true;
+    setRecording(true);
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    recordingRef.current = false;
+    setRecording(false);
+  }, []);
+
+  const clearRecording = useCallback(() => {
+    eventsRef.current = [];
+    setEventCount(0);
+  }, []);
+
+  const exportSession = useCallback(async (meta?: Record<string, unknown>) => {
+    const filename = `app-session-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      config: { ...cfgRef.current },
+      ...meta,
+      events: eventsRef.current,
+    };
+    try {
+      const res = await fetch('/save-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, data: payload }),
+      });
+      const json = await res.json();
+      if (json.ok) return `saved ${json.path ?? filename}`;
+      throw new Error(json.error ?? 'save failed');
+    } catch {
+      // Fallback: browser download.
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      return `downloaded ${filename}`;
+    }
+  }, []);
+
+  return {
+    running,
+    error,
+    heldNotes,
+    detectionId,
+    scores,
+    level,
+    gated,
+    start,
+    stop,
+    recording,
+    eventCount,
+    startRecording,
+    stopRecording,
+    clearRecording,
+    exportSession,
+  };
 }

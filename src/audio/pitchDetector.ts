@@ -227,14 +227,29 @@ function suppressGhosts(detected: number[], display: Map<number, number>): numbe
 const VERIFY_REL = 0.18; // fraction of the strongest expected note
 const VERIFY_FLOOR_MULT = 4; // multiples of the median background score
 
-export function verifyExpected(
+export interface ExpectedNoteDetail {
+  midi: number;
+  score: number;
+  relThreshold: number;
+  floorThreshold: number;
+  present: boolean;
+}
+
+export interface VerifyDetail {
+  floor: number;
+  maxExpected: number;
+  notes: ExpectedNoteDetail[];
+}
+
+/** Full verification with per-note scores and the thresholds applied (for diagnostics). */
+export function verifyExpectedDetailed(
   freqDb: Float32Array,
   sampleRate: number,
   fftSize: number,
   cfg: DetectorConfig,
   expected: number[],
-): number[] {
-  if (expected.length === 0) return [];
+): VerifyDetail {
+  if (expected.length === 0) return { floor: 0, maxExpected: 0, notes: [] };
   const binHz = sampleRate / fftSize;
   const nyq = sampleRate / 2;
   const spectrum = dbToLinear(freqDb);
@@ -245,7 +260,6 @@ export function verifyExpected(
   all.sort((a, b) => a - b);
   const floor = all[Math.floor(all.length / 2)] || 1e-9;
 
-  // Score each expected note; find the strongest for the relative test.
   const expScores = new Map<number, number>();
   let maxExp = 1e-9;
   for (const m of expected) {
@@ -254,10 +268,31 @@ export function verifyExpected(
     if (s > maxExp) maxExp = s;
   }
 
-  const present: number[] = [];
-  for (const m of expected) {
-    const s = expScores.get(m)!;
-    if (s >= maxExp * VERIFY_REL && s >= floor * VERIFY_FLOOR_MULT) present.push(m);
-  }
-  return present.sort((a, b) => a - b);
+  const relThreshold = maxExp * VERIFY_REL;
+  const floorThreshold = floor * VERIFY_FLOOR_MULT;
+  const notes: ExpectedNoteDetail[] = expected.map((m) => {
+    const score = expScores.get(m)!;
+    return {
+      midi: m,
+      score,
+      relThreshold,
+      floorThreshold,
+      present: score >= relThreshold && score >= floorThreshold,
+    };
+  });
+  return { floor, maxExpected: maxExp, notes };
+}
+
+/** Score-informed verification: which expected pitches are present. */
+export function verifyExpected(
+  freqDb: Float32Array,
+  sampleRate: number,
+  fftSize: number,
+  cfg: DetectorConfig,
+  expected: number[],
+): number[] {
+  return verifyExpectedDetailed(freqDb, sampleRate, fftSize, cfg, expected)
+    .notes.filter((n) => n.present)
+    .map((n) => n.midi)
+    .sort((a, b) => a - b);
 }

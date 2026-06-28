@@ -4,5 +4,6 @@ dist/
 .DS_Store
 *.tsbuildinfo
 
-# Phase 0 prototype: recorded test sessions stay local
+# Recorded test sessions stay local
 prototype/sessions/
+sessions/

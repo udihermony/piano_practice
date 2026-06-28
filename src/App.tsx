@@ -19,6 +19,7 @@ export default function App() {
   const [justMatched, setJustMatched] = useState(false);
   const [calibration, setCalibration] = useState<CalibrationData | null>(() => loadCalibration());
   const [showCalib, setShowCalib] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [library, setLibrary] = useState<string[]>([]);
@@ -194,6 +195,32 @@ export default function App() {
             <span style={{ color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>🎉 End</span>
           )}
           {mic.error && <span style={{ color: 'var(--red)', fontSize: 12 }}>{mic.error}</span>}
+          {divider}
+          {/* Diagnostics recorder */}
+          {!mic.recording ? (
+            <button onClick={mic.startRecording} style={{ fontSize: 11, padding: '6px 10px' }}>
+              ● Record
+            </button>
+          ) : (
+            <button
+              onClick={mic.stopRecording}
+              style={{ fontSize: 11, padding: '6px 10px', color: 'var(--red)' }}
+            >
+              ■ Stop rec ({mic.eventCount})
+            </button>
+          )}
+          <button
+            onClick={async () => setSaveMsg(await mic.exportSession({ title: osmd.title }))}
+            disabled={mic.eventCount === 0}
+            style={{ fontSize: 11, padding: '6px 10px' }}
+          >
+            Save
+          </button>
+          {saveMsg && (
+            <span style={{ fontSize: 11, color: 'var(--green)', fontFamily: 'var(--mono)' }}>
+              {saveMsg}
+            </span>
+          )}
         </div>
 
         {/* Compact readout row */}
