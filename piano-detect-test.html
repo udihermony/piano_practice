@@ -222,6 +222,11 @@
         </div>
       </div>
       <div class="ctl">
+        <label>Onset sensitivity (flux ratio) <b id="vFlux">2.5</b></label>
+        <input type="range" id="flux" min="1.2" max="5.0" step="0.1" value="2.5">
+        <span style="font-size:11px;color:var(--dim)">Lower = triggers on quieter/legato notes</span>
+      </div>
+      <div class="ctl">
         <label class="toggle"><input type="checkbox" id="fund" checked> Require fundamental present</label>
       </div>
     </div>
@@ -270,7 +275,7 @@
   // ---------- State / config ----------
   const cfg = {
     sens:0.45, gate:0.010, harm:6, oct:0.85, fft:16384,
-    lo:36, hi:96, requireFund:true, stabFrames:3
+    lo:36, hi:96, requireFund:true, stabFrames:3, onsetFluxRatio:2.5
   };
 
   // Per-note calibration boosts: midi -> score multiplier (default 1.0)
@@ -289,17 +294,17 @@
   const confirmed = {};
 
   // Onset detection + hold
-  // Strategy: detect a sharp RMS rise → run the detector for a short capture
-  // window (CAPTURE_FRAMES) → lock those notes in until the next onset or silence.
-  // The attack frame has the cleanest harmonic profile; sustain drifts and confuses.
-  const ONSET_RATIO   = 1.8;   // RMS must rise by this factor vs smoothed level
-  const ONSET_COOLDOWN_MS = 250; // ignore re-triggers within this window
-  const CAPTURE_FRAMES = 10;   // frames to collect after onset before locking (~165ms)
-  let rmsSmooth       = 0;
+  // Strategy: spectral flux (positive spectrum change) fires on each new note
+  // attack, even when playing legato where RMS doesn't spike.
+  // After onset: run detector for CAPTURE_FRAMES, vote, lock result.
+  const ONSET_COOLDOWN_MS = 200; // min ms between onsets
+  const CAPTURE_FRAMES = 10;    // frames after onset to collect votes (~165ms)
+  let prevSpectrum    = null;   // Float32Array of previous frame magnitudes
+  let fluxSmooth      = 0;      // smoothed flux baseline
   let lastOnsetMs     = -9999;
   let captureFramesLeft = 0;
-  let captureVotes    = {};    // midi -> hit count during capture window
-  let heldNotes       = [];    // locked detection result
+  let captureVotes    = {};
+  let heldNotes       = [];
   let heldScores      = new Map();
 
   // ---------- Session recorder ----------
@@ -462,19 +467,35 @@
 
     if(gated){
       // Silence: clear everything
-      rmsSmooth = 0; captureFramesLeft = 0; captureVotes = {};
+      prevSpectrum = null; fluxSmooth = 0; captureFramesLeft = 0; captureVotes = {};
       heldNotes = []; heldScores = new Map();
     } else {
       const now = performance.now();
 
-      // Onset detection: did RMS spike sharply above the smoothed baseline?
-      const isOnset = rmsSmooth > 0
-        && rms > rmsSmooth * ONSET_RATIO
-        && (now - lastOnsetMs) > ONSET_COOLDOWN_MS;
+      // Compute spectral flux: sum of positive magnitude increases vs previous frame.
+      // This fires on each new note attack even during legato playing where RMS
+      // doesn't rise much, because new partials appear in the spectrum.
+      const binCount = analyser.frequencyBinCount;
+      const curMag = new Float32Array(binCount);
+      for(let b=0; b<binCount; b++) curMag[b] = Math.pow(10, freqDb[b]/20);
 
-      // Smooth RMS slowly (time constant ~200ms) so sustained notes don't
-      // raise the baseline fast enough to block the next onset.
-      rmsSmooth = rmsSmooth === 0 ? rms : rmsSmooth * 0.92 + rms * 0.08;
+      let flux = 0;
+      if(prevSpectrum){
+        for(let b=0; b<binCount; b++){
+          const diff = curMag[b] - prevSpectrum[b];
+          if(diff > 0) flux += diff;  // half-wave rectified: only count increases
+        }
+      }
+      prevSpectrum = curMag;
+
+      // Smooth flux slowly so sustained sound raises the baseline gradually.
+      // An onset is when instantaneous flux is well above the smoothed baseline.
+      const fluxRatio = fluxSmooth > 0 ? flux / fluxSmooth : 0;
+      fluxSmooth = fluxSmooth === 0 ? flux : fluxSmooth * 0.90 + flux * 0.10;
+
+      const isOnset = fluxSmooth > 0
+        && fluxRatio > cfg.onsetFluxRatio
+        && (now - lastOnsetMs) > ONSET_COOLDOWN_MS;
 
       if(isOnset){
         lastOnsetMs = now;
@@ -509,6 +530,8 @@
                 votes: captureVotes[m] || 0
               })),
               rms: parseFloat(rms.toFixed(4)),
+              flux: parseFloat(flux.toFixed(4)),
+              fluxRatio: parseFloat(fluxRatio.toFixed(2)),
               allVotes: Object.fromEntries(
                 Object.entries(captureVotes)
                   .sort(([,a],[,b])=>b-a)
@@ -563,6 +586,7 @@
       srcNode.connect(analyser);
       freqDb=new Float32Array(analyser.frequencyBinCount);
       timeBuf=new Float32Array(analyser.fftSize);
+      prevSpectrum=null; fluxSmooth=0;
 
       running=true;
       startBtn.disabled=true; startBtn.dataset.on='true'; startBtn.textContent='● Listening';
@@ -603,6 +627,7 @@
   bind('sens','sens','vSens'); bind('gate','gate','vGate');
   bind('harm','harm','vHarm'); bind('oct','oct','vOct');
   $('stab').oninput=()=>{ cfg.stabFrames=parseInt($('stab').value); $('vStab').textContent=cfg.stabFrames; };
+  $('flux').oninput=()=>{ cfg.onsetFluxRatio=parseFloat($('flux').value); $('vFlux').textContent=cfg.onsetFluxRatio.toFixed(1); };
   $('fft').onchange=()=>{ cfg.fft=parseInt($('fft').value); if(running){stop();} };
   $('fund').onchange=e=>cfg.requireFund=e.target.checked;
   const rangeUpd=()=>{ cfg.lo=parseInt($('lo').value); cfg.hi=parseInt($('hi').value);
