@@ -402,28 +402,24 @@
       }
     }
 
-    // Rule 2 — Harmonic ghost suppression: drop a candidate if any stronger
-    // accepted note's harmonic series lands on it.
-    // Also check sub-harmonic: if candidate * ratio ≈ strong (candidate is a
-    // ghost of a lower strong note whose harmonic lands here).
-    // Tolerance: 35 cents (~2% frequency ratio).
+    // Rule 2 — Harmonic ghost suppression: for any pair of accepted notes where
+    // one is a harmonic of the other, suppress the HIGHER note (the ghost),
+    // regardless of which scored higher. On a piano the fundamental is always
+    // the real note; the overtone above it is always the ghost.
     const HARMONIC_RATIOS = [2.0, 3.0, 1.5, 2.5, 4.0, 5.0, 3.5];
     const RATIO_TOL = 0.02;
-    for(const candidate of detected){
-      if(suppressed.has(candidate)) continue;
-      const fCand = midiToFreq(candidate);
-      for(const strong of detected){
-        if(strong === candidate || suppressed.has(strong)) continue;
-        if(peelScores(strong) <= peelScores(candidate)) continue;
-        const fStrong = midiToFreq(strong);
-        const ratio = fCand / fStrong;
+    for(const lower of detected){
+      if(suppressed.has(lower)) continue;
+      const fLower = midiToFreq(lower);
+      for(const higher of detected){
+        if(higher <= lower || suppressed.has(higher)) continue;
+        const ratio = midiToFreq(higher) / fLower;
         for(const hr of HARMONIC_RATIOS){
           if(Math.abs(ratio - hr) / hr < RATIO_TOL){
-            suppressed.add(candidate);
+            suppressed.add(higher); // always suppress the upper note
             break;
           }
         }
-        if(suppressed.has(candidate)) break;
       }
     }
 
@@ -522,7 +518,7 @@
         if(captureFramesLeft === 0){
           // Lock in notes detected in majority of the voting frames
           const votingFrames = CAPTURE_FRAMES - CAPTURE_SKIP;
-          const threshold = Math.ceil(votingFrames * 0.6);
+          const threshold = Math.ceil(votingFrames * 0.7);
           heldNotes = Object.entries(captureVotes)
             .filter(([,v])=>v >= threshold)
             .map(([m])=>parseInt(m))
