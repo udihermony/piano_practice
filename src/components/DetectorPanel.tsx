@@ -1,14 +1,11 @@
-import { useMic } from '../audio/useMic';
+import type { UseMic } from '../audio/useMic';
 import { noteName } from '../lib/midi';
 
 /**
- * Phase 2a live readout: mic + detector, mirroring the Phase 0 prototype but
- * inside the app. Verifies the ported detector behaves on real hardware before
- * we layer the score-informed matcher on top.
+ * Live detector readout: mic level + detected notes. The mic instance is owned by
+ * App (so the practice loop can also consume it) and passed in here.
  */
-export function DetectorPanel() {
-  const mic = useMic();
-
+export function DetectorPanel({ mic }: { mic: UseMic }) {
   return (
     <div
       style={{

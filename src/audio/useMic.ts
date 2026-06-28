@@ -34,6 +34,11 @@ export interface UseMic {
   error: string | null;
   /** Locked detection result, held until next onset/silence. */
   heldNotes: number[];
+  /**
+   * Increments once per onset lock-in (even if the note set is unchanged). Lets the
+   * matcher evaluate exactly one attempt per strike — essential for repeated notes.
+   */
+  detectionId: number;
   /** Normalized per-note display scores from the last analyzed frame. */
   scores: Map<number, number>;
   /** Current input RMS (0..~0.3). */
@@ -56,6 +61,7 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [heldNotes, setHeldNotes] = useState<number[]>([]);
+  const [detectionId, setDetectionId] = useState(0);
   const [scores, setScores] = useState<Map<number, number>>(new Map());
   const [level, setLevel] = useState(0);
   const [gated, setGated] = useState(true);
@@ -163,6 +169,7 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
           .sort((a, b) => a - b);
         heldRef.current = locked;
         setHeldNotes(locked);
+        if (locked.length > 0) setDetectionId((id) => id + 1);
       }
     }
   }, [gate, onsetFluxRatio]);
@@ -220,5 +227,5 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
   // Clean up on unmount.
   useEffect(() => stop, [stop]);
 
-  return { running, error, heldNotes, scores, level, gated, start, stop };
+  return { running, error, heldNotes, detectionId, scores, level, gated, start, stop };
 }
