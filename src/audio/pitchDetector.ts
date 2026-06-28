@@ -61,7 +61,15 @@ function harmBins(
   return [Math.max(0, Math.floor((fh - win) / binHz)), Math.min(len - 1, Math.ceil((fh + win) / binHz))];
 }
 
-/** Fundamental-dominant harmonic-template score for note `m` over a linear spectrum. */
+/**
+ * Register-aware harmonic-template score for note `m` over a linear spectrum.
+ *
+ * Phone mics roll off low frequencies (tuned for voice, ~300 Hz up), so a bass
+ * note's fundamental can be almost entirely missing while its harmonics — which
+ * land in the mic's good range — are strong. We therefore weight the fundamental
+ * by how reliably the mic captures it: low notes are detected via their harmonics,
+ * high notes via the fundamental. This fixed the C3-invisible problem on phone.
+ */
 function harmonicScore(
   spectrum: Float32Array,
   m: number,
@@ -80,8 +88,9 @@ function harmonicScore(
     if (h === 1) fund = peak;
     else upper += peak / h;
   }
-  const raw = cfg.requireFund ? fund + 0.5 * upper : 0.6 * fund + 0.7 * upper;
-  return raw * (cfg.noteBoost[m] ?? 1);
+  // Fundamental reliability: ~0.15 below ~130 Hz, ramping to 1.0 by ~320 Hz.
+  const fundWeight = Math.min(1, Math.max(0.15, (f0 - 120) / 200));
+  return (fundWeight * fund + upper) * (cfg.noteBoost[m] ?? 1);
 }
 
 function dbToLinear(freqDb: Float32Array): Float32Array<ArrayBuffer> {
