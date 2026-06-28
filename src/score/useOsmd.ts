@@ -61,6 +61,16 @@ export function useOsmd(): UseOsmd {
     };
   }, []);
 
+  // Scroll the score so the cursor stays in view (centered in its scroll parent).
+  // Deferred a frame so OSMD has positioned the cursor element after a cursor move.
+  const scrollToCursor = useCallback(() => {
+    requestAnimationFrame(() => {
+      const el = (osmdRef.current?.cursor as { cursorElement?: HTMLElement } | undefined)
+        ?.cursorElement;
+      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+  }, []);
+
   const readExpectedMidi = useCallback(() => {
     const osmd = osmdRef.current;
     if (!osmd?.cursor) {
@@ -146,14 +156,16 @@ export function useOsmd(): UseOsmd {
     if (!osmd?.cursor) return;
     osmd.cursor.next();
     readExpectedMidi();
-  }, [readExpectedMidi]);
+    scrollToCursor();
+  }, [readExpectedMidi, scrollToCursor]);
 
   const prev = useCallback(() => {
     const osmd = osmdRef.current;
     if (!osmd?.cursor) return;
     osmd.cursor.previous();
     readExpectedMidi();
-  }, [readExpectedMidi]);
+    scrollToCursor();
+  }, [readExpectedMidi, scrollToCursor]);
 
   const reset = useCallback(() => {
     const osmd = osmdRef.current;

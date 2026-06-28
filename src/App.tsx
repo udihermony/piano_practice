@@ -4,7 +4,6 @@ import { SAMPLE_C_MAJOR } from './score/sampleScore';
 import { noteName } from './lib/midi';
 import { useMic } from './audio/useMic';
 import { evaluateMatch } from './score/matcher';
-import { DetectorPanel } from './components/DetectorPanel';
 import { CalibrationWizard } from './components/CalibrationWizard';
 import {
   boostMap,
@@ -76,23 +75,15 @@ export default function App() {
     evaluateMatch(osmd.expectedMidi, mic.heldNotes).satisfied,
   );
 
-  return (
-    <div>
-      <header style={{ marginBottom: 14 }}>
-        <div
-          style={{
-            fontFamily: 'var(--mono)',
-            fontSize: 11,
-            color: 'var(--amber)',
-            letterSpacing: '0.18em',
-            textTransform: 'uppercase',
-          }}
-        >
-          Piano Practice
-        </div>
-        <h1 style={{ fontSize: 18, margin: '4px 0 10px' }}>{osmd.title || 'Piano Practice'}</h1>
+  const divider = <span style={{ width: 1, height: 20, background: 'var(--line)' }} />;
 
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 32px)', gap: 10 }}>
+      {/* ---- Toolbar (always visible) ---- */}
+      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Source row */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: 14, marginRight: 4 }}>{osmd.title || 'Piano Practice'}</strong>
           <input
             ref={fileInputRef}
             type="file"
@@ -137,99 +128,88 @@ export default function App() {
           >
             Sample
           </button>
-          <span style={{ width: 1, height: 22, background: 'var(--line)' }} />
+          {divider}
           <button onClick={() => setShowCalib(true)}>
-            {calibration ? 'Recalibrate' : 'Calibrate piano'}
+            {calibration ? 'Recalibrate' : 'Calibrate'}
           </button>
           {calibration && (
-            <span style={{ fontSize: 11, color: 'var(--dim)', fontFamily: 'var(--mono)' }}>
-              {calibLabel(calibration) || 'calibrated'}
-              <button
-                onClick={() => {
-                  clearCalibration();
-                  setCalibration(null);
-                }}
-                style={{ marginLeft: 8, padding: '2px 8px', fontSize: 11 }}
-              >
-                clear
-              </button>
-            </span>
+            <button
+              onClick={() => {
+                clearCalibration();
+                setCalibration(null);
+              }}
+              style={{ padding: '4px 10px', fontSize: 11 }}
+              title={calibLabel(calibration) || 'calibrated'}
+            >
+              clear cal
+            </button>
           )}
         </div>
-      </header>
 
-      {osmd.error && (
-        <div style={{ color: 'var(--red)', marginBottom: 12 }}>
-          Failed to load score: {osmd.error}
+        {/* Transport row */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            className={practicing ? '' : 'primary'}
+            onClick={() => setPracticing((p) => !p)}
+            disabled={!osmd.loaded}
+          >
+            {practicing ? '■ Stop' : '▶ Practice'}
+          </button>
+          {!mic.running ? (
+            <button onClick={() => void mic.start()}>🎤 Start mic</button>
+          ) : (
+            <button onClick={mic.stop}>🎤 Stop mic</button>
+          )}
+          {divider}
+          <button onClick={osmd.prev} disabled={!osmd.loaded || practicing}>
+            ◀
+          </button>
+          <button onClick={osmd.next} disabled={!osmd.loaded || osmd.atEnd || practicing}>
+            ▶
+          </button>
+          <button onClick={osmd.reset} disabled={!osmd.loaded}>
+            ⟲
+          </button>
+          {/* Mic level */}
+          <div
+            style={{
+              width: 70,
+              height: 6,
+              background: '#100e0c',
+              borderRadius: 3,
+              overflow: 'hidden',
+              border: '1px solid var(--line)',
+            }}
+          >
+            <div
+              style={{
+                height: '100%',
+                width: `${Math.min(100, mic.level * 600)}%`,
+                background: mic.gated ? 'var(--line)' : 'var(--green)',
+                transition: 'width .05s linear',
+              }}
+            />
+          </div>
+          {osmd.atEnd && (
+            <span style={{ color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>🎉 End</span>
+          )}
+          {mic.error && <span style={{ color: 'var(--red)', fontSize: 12 }}>{mic.error}</span>}
         </div>
-      )}
 
-      <div
-        className="score-surface"
-        style={{
-          marginBottom: 14,
-          outline: justMatched ? '2px solid var(--green)' : '2px solid transparent',
-          transition: 'outline-color .15s',
-        }}
-      >
-        <div ref={osmd.containerRef} />
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
-        <button
-          className={practicing ? '' : 'primary'}
-          onClick={() => setPracticing((p) => !p)}
-          disabled={!osmd.loaded}
-        >
-          {practicing ? '■ Stop practice' : '▶ Start practice'}
-        </button>
-        <span style={{ width: 1, height: 22, background: 'var(--line)' }} />
-        <button onClick={osmd.prev} disabled={!osmd.loaded || practicing}>
-          ◀ Prev
-        </button>
-        <button onClick={osmd.next} disabled={!osmd.loaded || osmd.atEnd || practicing}>
-          Next ▶
-        </button>
-        <button onClick={osmd.reset} disabled={!osmd.loaded}>
-          Reset
-        </button>
-        {osmd.atEnd && (
-          <span style={{ color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>
-            🎉 End of score
-          </span>
-        )}
-        {practicing && !osmd.atEnd && (
-          <span style={{ color: 'var(--dim)', fontSize: 13 }}>
-            {mic.running ? 'play the highlighted notes…' : 'start the mic below to play'}
-          </span>
-        )}
-      </div>
-
-      <div
-        style={{
-          fontFamily: 'var(--mono)',
-          background: 'var(--panel)',
-          border: '1px solid var(--line)',
-          borderRadius: 9,
-          padding: '14px 16px',
-        }}
-      >
+        {/* Compact readout row */}
         <div
           style={{
-            fontSize: 10,
-            color: 'var(--dim)',
-            letterSpacing: '0.16em',
-            textTransform: 'uppercase',
-            marginBottom: 8,
+            display: 'flex',
+            gap: 12,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            fontFamily: 'var(--mono)',
+            fontSize: 12,
           }}
         >
-          Expected at cursor
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ color: 'var(--dim)' }}>Expected:</span>
           {osmd.expectedMidi.length === 0 ? (
-            <span style={{ color: 'var(--dim)', fontStyle: 'italic' }}>
-              {osmd.loaded ? '(rest or end)' : 'Loading…'}
-            </span>
+            <span style={{ color: 'var(--dim)', fontStyle: 'italic' }}>—</span>
           ) : (
             osmd.expectedMidi.map((m) => {
               const ok = expectedSatisfied.has(m);
@@ -237,27 +217,49 @@ export default function App() {
                 <span
                   key={m}
                   style={{
-                    fontSize: 14,
                     fontWeight: 600,
-                    padding: '4px 10px',
-                    borderRadius: 6,
-                    background: 'var(--panel)',
+                    padding: '2px 8px',
+                    borderRadius: 5,
                     color: ok ? 'var(--green)' : 'var(--amber)',
                     border: `1px solid ${ok ? 'var(--green)' : 'var(--amber)'}`,
                   }}
                 >
                   {noteName(m)}
-                  <span style={{ color: 'var(--ink)', opacity: 0.6, marginLeft: 6, fontSize: 12 }}>
-                    {m}
-                  </span>
                 </span>
               );
             })
           )}
+          {divider}
+          <span style={{ color: 'var(--dim)' }}>Heard:</span>
+          {mic.heldNotes.length === 0 ? (
+            <span style={{ color: 'var(--dim)', fontStyle: 'italic' }}>—</span>
+          ) : (
+            mic.heldNotes.map((m) => (
+              <span key={m} style={{ color: 'var(--green)', fontWeight: 600 }}>
+                {noteName(m)}
+              </span>
+            ))
+          )}
         </div>
       </div>
 
-      <DetectorPanel mic={mic} />
+      {osmd.error && (
+        <div style={{ color: 'var(--red)' }}>Failed to load score: {osmd.error}</div>
+      )}
+
+      {/* ---- Score fills remaining height, scrolls internally, follows cursor ---- */}
+      <div
+        className="score-surface"
+        style={{
+          flex: '1 1 auto',
+          minHeight: 0,
+          overflow: 'auto',
+          outline: justMatched ? '2px solid var(--green)' : '2px solid transparent',
+          transition: 'outline-color .15s',
+        }}
+      >
+        <div ref={osmd.containerRef} />
+      </div>
 
       {showCalib && (
         <CalibrationWizard
