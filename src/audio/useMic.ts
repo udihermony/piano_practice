@@ -89,7 +89,12 @@ export interface UseMic {
 const ONSET_COOLDOWN_MS = 200;
 const CAPTURE_FRAMES = 10;
 const CAPTURE_SKIP = 1;
-const VOTE_FRACTION = 0.7;
+// Fraction of voting frames a note must appear in to lock. Lenient in verify mode
+// (we only test expected pitches, so ghosts can't sneak in, and bass notes decay
+// fast / register unevenly on phone mics), stricter for free transcription.
+const VOTE_FRACTION_VERIFY = 0.4;
+const VOTE_FRACTION_FREE = 0.6;
+const MIN_VOTES = 2;
 
 export function useMic(opts: UseMicOptions = {}): UseMic {
   const gate = opts.gate ?? 0.01;
@@ -250,7 +255,9 @@ export function useMic(opts: UseMicOptions = {}): UseMic {
 
       if (captureLeftRef.current === 0) {
         const votingFrames = CAPTURE_FRAMES - CAPTURE_SKIP;
-        const threshold = Math.ceil(votingFrames * VOTE_FRACTION);
+        const inVerify = !!(expectedRef.current && expectedRef.current.length > 0);
+        const frac = inVerify ? VOTE_FRACTION_VERIFY : VOTE_FRACTION_FREE;
+        const threshold = Math.max(MIN_VOTES, Math.ceil(votingFrames * frac));
         const locked = Object.entries(captureVotesRef.current)
           .filter(([, v]) => v >= threshold)
           .map(([m]) => parseInt(m, 10))

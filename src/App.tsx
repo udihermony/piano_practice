@@ -82,7 +82,7 @@ export default function App() {
         silenceTimerRef.current = window.setTimeout(() => {
           setSatisfied(new Set());
           silenceTimerRef.current = null;
-        }, 2000);
+        }, 5000);
       }
     } else if (silenceTimerRef.current != null) {
       clearTimeout(silenceTimerRef.current);
