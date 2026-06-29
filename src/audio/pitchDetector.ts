@@ -264,11 +264,14 @@ export function verifyExpectedDetailed(
   const nyq = sampleRate / 2;
   const spectrum = dbToLinear(freqDb);
 
-  // Background floor: median score across the full candidate range.
+  // Background floor: a LOW percentile of candidate scores, not the median. A loud
+  // note (esp. bass with register-aware upper-harmonic weighting) elevates many
+  // candidates and would inflate the median — pushing a quieter chord member under
+  // the bar. The 25th percentile tracks the quiet majority = true noise floor.
   const all: number[] = [];
   for (let m = cfg.lo; m <= cfg.hi; m++) all.push(harmonicScore(spectrum, m, binHz, nyq, cfg));
   all.sort((a, b) => a - b);
-  const floor = all[Math.floor(all.length / 2)] || 1e-9;
+  const floor = all[Math.floor(all.length * 0.25)] || 1e-9;
 
   const expScores = new Map<number, number>();
   let maxExp = 1e-9;
