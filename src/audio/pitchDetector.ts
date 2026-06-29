@@ -233,8 +233,9 @@ function suppressGhosts(detected: number[], display: Map<number, number>): numbe
  *  - well above the background floor (median score across the candidate range),
  *    which confirms real energy at that pitch rather than noise/bleed.
  */
-const VERIFY_REL = 0.18; // fraction of the strongest expected note
-const VERIFY_FLOOR_MULT = 4; // multiples of the median background score
+const VERIFY_REL = 0.15; // fraction of the strongest expected note
+const VERIFY_FLOOR_MULT = 3; // multiples of the median background score (relaxed so a
+// sustained bass note still clears the bar when a fresh strike raises the floor)
 
 export interface ExpectedNoteDetail {
   midi: number;

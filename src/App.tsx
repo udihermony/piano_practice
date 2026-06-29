@@ -3,7 +3,6 @@ import { useOsmd } from './score/useOsmd';
 import { SAMPLE_C_MAJOR } from './score/sampleScore';
 import { noteName } from './lib/midi';
 import { useMic } from './audio/useMic';
-import { evaluateMatch } from './score/matcher';
 import { CalibrationWizard } from './components/CalibrationWizard';
 import {
   boostMap,
@@ -55,26 +54,65 @@ export default function App() {
     if (osmd.expectedMidi.length === 0) osmd.next();
   }, [practicing, osmd.loaded, osmd.atEnd, osmd.expectedMidi, osmd]);
 
-  // The practice loop: evaluate exactly one match attempt per detection event
-  // (keyed on detectionId so a held chord can't re-trigger advancement, and
-  // repeated notes still work since each strike is a new onset).
+  // The practice loop with note ACCUMULATION across strikes at a position.
+  // Real playing spreads a "chord" out in time — bass struck and held while the
+  // RH plays, rolled chords, hands not perfectly together. So instead of requiring
+  // all expected notes in one ~165ms capture, we accumulate expected notes as they
+  // are detected and advance once the whole set has been satisfied. The accumulator
+  // resets when the position changes (advance/nav) or after a stretch of silence.
+  const [satisfied, setSatisfied] = useState<Set<number>>(new Set());
   const lastEvalRef = useRef(0);
+  const posKeyRef = useRef('');
+  const posKey = osmd.expectedMidi.join(',');
+
+  // Reset the accumulator when the cursor position changes.
+  useEffect(() => {
+    if (posKey !== posKeyRef.current) {
+      posKeyRef.current = posKey;
+      setSatisfied(new Set());
+    }
+  }, [posKey]);
+
+  // Reset the accumulator after sustained silence (player restarting the position).
+  const silenceTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!practicing) return;
+    if (mic.gated) {
+      if (silenceTimerRef.current == null) {
+        silenceTimerRef.current = window.setTimeout(() => {
+          setSatisfied(new Set());
+          silenceTimerRef.current = null;
+        }, 2000);
+      }
+    } else if (silenceTimerRef.current != null) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, [mic.gated, practicing]);
+
   useEffect(() => {
     if (!practicing || !osmd.loaded || osmd.atEnd) return;
     if (mic.detectionId === lastEvalRef.current) return;
     lastEvalRef.current = mic.detectionId;
+    if (osmd.expectedMidi.length === 0) return;
 
-    const result = evaluateMatch(osmd.expectedMidi, mic.heldNotes);
-    if (result.matched) {
+    // Accumulate any expected notes found in this detection event.
+    const expectedSet = new Set(osmd.expectedMidi);
+    const next = new Set(satisfied);
+    for (const m of mic.heldNotes) if (expectedSet.has(m)) next.add(m);
+
+    const allSatisfied = osmd.expectedMidi.every((m) => next.has(m));
+    if (allSatisfied) {
       setJustMatched(true);
       window.setTimeout(() => setJustMatched(false), 250);
+      setSatisfied(new Set());
       osmd.next();
+    } else {
+      setSatisfied(next);
     }
-  }, [mic.detectionId, mic.heldNotes, practicing, osmd]);
+  }, [mic.detectionId, mic.heldNotes, practicing, osmd, satisfied]);
 
-  const expectedSatisfied = new Set(
-    evaluateMatch(osmd.expectedMidi, mic.heldNotes).satisfied,
-  );
+  const expectedSatisfied = satisfied;
 
   const divider = <span style={{ width: 1, height: 20, background: 'var(--line)' }} />;
 
