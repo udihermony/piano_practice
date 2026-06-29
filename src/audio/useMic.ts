@@ -98,7 +98,11 @@ const MIN_VOTES = 2;
 
 export function useMic(opts: UseMicOptions = {}): UseMic {
   const gate = opts.gate ?? 0.01;
-  const fftSize = opts.fftSize ?? 16384;
+  // 8192 ≈ 171ms FFT window at 48kHz — fills fast enough to match the ~165ms capture
+  // window, so detection isn't working off a stale third-of-a-second spectrum (which
+  // caused phantom misses and cursor lag). Resolution is fine for verify mode, where
+  // we only test specific expected pitches and never resolve adjacent semitones.
+  const fftSize = opts.fftSize ?? 8192;
   const onsetFluxRatio = opts.onsetFluxRatio ?? 2.5;
 
   const [running, setRunning] = useState(false);

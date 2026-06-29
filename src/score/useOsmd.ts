@@ -67,7 +67,7 @@ export function useOsmd(): UseOsmd {
     requestAnimationFrame(() => {
       const el = (osmdRef.current?.cursor as { cursorElement?: HTMLElement } | undefined)
         ?.cursorElement;
-      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el?.scrollIntoView({ block: 'center', behavior: 'auto' });
     });
   }, []);
 

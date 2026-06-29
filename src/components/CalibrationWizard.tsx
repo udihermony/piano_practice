@@ -18,7 +18,7 @@ import {
  */
 
 const CAPTURE_MS = 2200;
-const FFT_SIZE = 16384;
+const FFT_SIZE = 8192; // match the detector's FFT so calibration scores are comparable
 
 type Phase = 'idle' | 'ready' | 'capturing' | 'done';
 
